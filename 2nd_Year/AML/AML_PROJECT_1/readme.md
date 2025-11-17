@@ -1,4 +1,3 @@
-README = """
 # Heart Disease Classification - Code Documentation
 
 ## Project Structure
@@ -133,5 +132,4 @@ See requirements.txt for the complete list.
 - scikit-learn: ML algorithms and evaluation  
 - matplotlib, seaborn: Visualization  
 - feature-engine: Data transformations  
-- ucimlrepo: Dataset access  
-"""
+- ucimlrepo: Dataset access
