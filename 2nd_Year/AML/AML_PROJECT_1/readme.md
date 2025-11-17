@@ -1,7 +1,7 @@
 # Heart Disease Classification - Code Documentation
 
 ## Project Structure
-
+<pre>
 AML_PROJECT_1/
 ├── src/
 │ ├── data_ops.py # Data loading, preprocessing, transformations
@@ -17,7 +17,7 @@ AML_PROJECT_1/
 ├── AML_PROJECT_1.ipynb # Main analysis notebook
 ├── requirements.txt # Python dependencies
 └── readme.md # Project documentation
-
+</pre>
 ---
 
 ## Setup Instructions
@@ -133,4 +133,5 @@ See requirements.txt for the complete list.
 - matplotlib, seaborn: Visualization  
 - feature-engine: Data transformations  
 - ucimlrepo: Dataset access
+
 
