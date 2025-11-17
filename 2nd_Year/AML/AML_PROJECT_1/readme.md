@@ -4,19 +4,19 @@
 
 AML_PROJECT_1/
 ├── src/
-│   ├── data_ops.py                  # Data loading, preprocessing, and transformations
-│   ├── models.py                    # Model implementations and comparison framework
-│   └── plots.py                     # Visualization functions
+│ ├── data_ops.py # Data loading, preprocessing, transformations
+│ ├── models.py # Model implementations and comparison framework
+│ └── plots.py # Visualization functions
 ├── data/
-│   └── model_comparison_summary.csv # Model performance summary (generated)
+│ └── model_comparison_summary.csv # Model performance summary (generated)
 ├── img/
-│   ├── continuous_distributions_with_qq.png  # Feature distributions with Q-Q plots (generated)
-│   ├── correlation_heatmap.png               # Correlation heatmap (generated)
-│   ├── auc_boxplots.png                      # AUC comparisons (generated)
-│   └── hyperparameter_distributions.png      # Hyperparameter distributions (generated)
-├── AML_PROJECT_1.ipynb             # Main analysis notebook
-├── requirements.txt                # Python dependencies
-└── readme.md                       # This file
+│ ├── continuous_distributions_with_qq.png # Feature distributions with Q-Q plots (generated)
+│ ├── correlation_heatmap.png # Correlation heatmap (generated)
+│ ├── auc_boxplots.png # AUC comparisons (generated)
+│ └── hyperparameter_distributions.png # Hyperparameter distributions (generated)
+├── AML_PROJECT_1.ipynb # Main analysis notebook
+├── requirements.txt # Python dependencies
+└── readme.md # Project documentation
 
 ---
 
@@ -133,3 +133,4 @@ See requirements.txt for the complete list.
 - matplotlib, seaborn: Visualization  
 - feature-engine: Data transformations  
 - ucimlrepo: Dataset access
+
