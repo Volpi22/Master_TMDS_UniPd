@@ -1,0 +1,1185 @@
+---
+title: "LAB05 CSN"
+author: "Gabriele Villa, Davide Volpi"
+date: "2025-11-26"
+output: html_document
+---
+
+```{r setup}
+# Set knitr options for code chunk output
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Model Selection for Network Dynamics
+
+<!--
+This lab implements model selection for three variants of the Barabási-Albert model:
+-->
+
+## Necessary libraries
+
+```{r}
+# Load required libraries for statistical modeling and plotting
+library(VGAM)
+library(stats4)
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(minpack.lm)
+```
+
+## Shared Functions
+
+### Negative log-likelihood functions for degree distribution
+
+```{r}
+# Functions to create negative log-likelihoods for various distributions
+
+create_minus_log_likelihood_zeta <- function(M_prime, N, k_min) {
+  function(gamma) {
+    if (gamma <= 1) return(Inf)
+    Z <- sum((k_min:10000)^(-gamma))
+    gamma * M_prime + N * log(Z)
+  }
+}
+
+create_minus_log_likelihood_poisson <- function(M, C, N) {
+  function(lambda) {
+    if (lambda <= 0) return(Inf)
+    -(M * log(lambda) - N * (lambda + log(1 - exp(-lambda))) - C)
+  }
+}
+
+create_minus_log_likelihood_geom <- function(M, N, k_min) {
+  function(q) {
+    if (q <= 0 || q >= 1) return(Inf)
+    -( M * log(1 - q) + N * log(q) )
+  }
+}
+
+H_zetatrunc <- function(gamma, k_min, k_max) {
+  if (gamma <= 0) stop("gamma must be positive")
+  sum((k_min:k_max)^(-gamma))
+}
+
+create_minus_log_likelihood_right_trunc_zeta <- function(M_prime, N, k_min) {
+  function(gamma, k_max) {
+    gamma * M_prime + N * log(H_zetatrunc(gamma, k_min, k_max))
+  }
+}
+
+create_minus_log_likelihood_gaussian <- function(M, S, N) {
+  function(mu, sigma) {
+    if (sigma <= 0) return(Inf)
+    N * log(sigma * sqrt(2 * pi)) + S / (2 * sigma^2)
+  }
+}
+
+create_minus_log_likelihood_right_trunc_geom <- function(M, N, k_min) {
+  function(q, k_max) {
+    if (q <= 0 || q >= 1) return(Inf)
+    Z <- 1 - (1 - q)^(k_max - k_min + 1)
+    -( M * log(1 - q) + N * log(q) - N * log(Z) )
+  }
+}
+
+get_AIC <- function(m2logL, K, N) {
+  m2logL + 2 * K * N / (N - K - 1)
+}
+
+get_AIC_nls <- function(RSS, p, n) {
+  n * log(2 * pi) + n * log(RSS / n) + n + 2 * (p + 1)
+}
+
+d_pois <- function(k, lambda) dpois(k, lambda) / (1 - exp(-lambda))
+d_geom <- function(k, q) dgeom(k - 1, prob = q)
+d_geom_trunc <- function(k, q, k_max) {
+  Z <- 1 - (1 - q)^k_max
+  dgeom(k - 1, prob = q) / Z
+}
+d_zeta <- function(k, gamma, k_min) {
+  Z <- sum((k_min:10000)^(-gamma))
+  (k^(-gamma)) / Z
+}
+d_zeta_trunc <- function(k, gamma, k_min, kmax) {
+  Z <- sum((k_min:kmax)^(-gamma))
+  (k^(-gamma)) / Z
+}
+d_gaussian <- function(k, mu, sigma) {
+  dnorm(k, mean = mu, sd = sigma)
+}
+```
+
+### Growth models for time series
+
+```{r}
+# Fit a set of candidate growth models to a time series of degree evolution
+fit_all_growth_models <- function(data, ti) {
+  results <- list()
+
+  data <- data[data$time >= ti, ]
+
+  t <- data$time
+  k <- data$degree
+  n <- length(t)
+
+  #MODEL 0
+  tryCatch({
+    fit0 <- lm(k ~ t - 1)
+    RSS0 <- sum(residuals(fit0)^2)
+    AIC0 <- get_AIC_nls(RSS0, 1, n)
+    results$Model0 <- list(fit = fit0, AIC = AIC0, params = coef(fit0), RSS = RSS0)
+  }, error = function(e) { results$Model0 <<- NULL })
+
+  #MODEL 0+
+  tryCatch({
+    fit0plus <- lm(k ~ t)
+    RSS0plus <- sum(residuals(fit0plus)^2)
+    AIC0plus <- get_AIC_nls(RSS0plus, 2, n)
+    results$Model0plus <- list(fit = fit0plus, AIC = AIC0plus, params = coef(fit0plus), RSS = RSS0plus)
+  }, error = function(e) { results$Model0plus <<- NULL })
+
+  #MODEL 1
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ I(log(t)))
+    a_start <- as.numeric(exp(coef(lm_temp)[1]))
+
+    fit1 <- nlsLM(k ~ a * t^0.5,
+                  start = list(a = a_start),
+                  control = nls.lm.control(maxiter = 200))
+    RSS1 <- sum(residuals(fit1)^2)
+    AIC1 <- get_AIC_nls(RSS1, 1, n)
+    results$Model1 <- list(fit = fit1, AIC = AIC1, params = coef(fit1), RSS = RSS1)
+  }, error = function(e) { results$Model1 <<- NULL })
+
+  #MODEL 1+
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ I(log(t)))
+    a_start <- as.numeric(exp(coef(lm_temp)[1]))
+
+    fit1plus <- nlsLM(k ~ a * t^0.5 + d,
+                      start = list(a = a_start, d = 0),
+                      control = nls.lm.control(maxiter = 200))
+    RSS1plus <- sum(residuals(fit1plus)^2)
+    AIC1plus <- get_AIC_nls(RSS1plus, 2, n)
+    results$Model1plus <- list(fit = fit1plus, AIC = AIC1plus, params = coef(fit1plus), RSS = RSS1plus)
+  }, error = function(e) { results$Model1plus <<- NULL })
+
+  #MODEL 2
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ I(log(t)))
+    a_start <- as.numeric(exp(coef(lm_temp)[1]))
+    b_start <- as.numeric(coef(lm_temp)[2])
+
+    fit2 <- nlsLM(k ~ a * t^b,
+                  start = list(a = a_start, b = b_start),
+                  control = nls.lm.control(maxiter = 200))
+    RSS2 <- sum(residuals(fit2)^2)
+    AIC2 <- get_AIC_nls(RSS2, 2, n)
+    results$Model2 <- list(fit = fit2, AIC = AIC2, params = coef(fit2), RSS = RSS2)
+  }, error = function(e) { results$Model2 <<- NULL })
+
+  #MODEL 2+
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ I(log(t)))
+    a_start <- as.numeric(exp(coef(lm_temp)[1]))
+    b_start <- as.numeric(coef(lm_temp)[2])
+
+    fit2plus <- nlsLM(k ~ a * t^b + d,
+                      start = list(a = a_start, b = b_start, d = 0),
+                      control = nls.lm.control(maxiter = 200))
+    RSS2plus <- sum(residuals(fit2plus)^2)
+    AIC2plus <- get_AIC_nls(RSS2plus, 3, n)
+    results$Model2plus <- list(fit = fit2plus, AIC = AIC2plus, params = coef(fit2plus), RSS = RSS2plus)
+  }, error = function(e) { results$Model2plus <<- NULL })
+
+  #MODEL 3
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ t)
+    a_start <- exp(coef(lm_temp)[1])
+    c_start <- coef(lm_temp)[2]
+
+    fit3 <- nlsLM(k ~ a * exp(c * t),
+                  start = list(a = a_start, c = c_start),
+                  control = nls.lm.control(maxiter = 200))
+    RSS3 <- sum(residuals(fit3)^2)
+    AIC3 <- get_AIC_nls(RSS3, 2, n)
+    results$Model3 <- list(fit = fit3, AIC = AIC3, params = coef(fit3), RSS = RSS3)
+  }, error = function(e) { results$Model3 <<- NULL })
+
+  #MODEL 3+
+  tryCatch({
+    lm_temp <- lm(log(k + 1) ~ t)
+    a_start <- exp(coef(lm_temp)[1])
+    c_start <- coef(lm_temp)[2]
+
+    fit3plus <- nlsLM(k ~ a * exp(c * t) + d,
+                      start = list(a = a_start, c = c_start, d = 0),
+                      control = nls.lm.control(maxiter = 200))
+    RSS3plus <- sum(residuals(fit3plus)^2)
+    AIC3plus <- get_AIC_nls(RSS3plus, 3, n)
+    results$Model3plus <- list(fit = fit3plus, AIC = AIC3plus, params = coef(fit3plus), RSS = RSS3plus)
+  }, error = function(e) { results$Model3plus <<- NULL })
+
+  #MODEL 4
+  tryCatch({
+    lm_temp <- lm(k ~ I(log(t)))
+    a_start <- as.numeric(coef(lm_temp)[2])
+    d1_start <- 1
+
+    fit4 <- nlsLM(k ~ a * log(t + d1),
+                  start = list(a = a_start, d1 = d1_start),
+                  control = nls.lm.control(maxiter = 200),
+                  lower = c(a = -Inf, d1 = 0))
+    RSS4 <- sum(residuals(fit4)^2)
+    AIC4 <- get_AIC_nls(RSS4, 2, n)
+    results$Model4 <- list(fit = fit4, AIC = AIC4, params = coef(fit4), RSS = RSS4)
+  }, error = function(e) { results$Model4 <<- NULL })
+
+  #MODEL 4+
+  tryCatch({
+    lm_temp <- lm(k ~ I(log(t)))
+    a_start <- as.numeric(coef(lm_temp)[2])
+    d1_start <- 1
+
+    fit4plus <- nlsLM(k ~ a * log(t + d1) + d2,
+                      start = list(a = a_start, d1 = d1_start, d2 = 0),
+                      control = nls.lm.control(maxiter = 200),
+                      lower = c(a = -Inf, d1 = 0, d2 = -Inf))
+    RSS4plus <- sum(residuals(fit4plus)^2)
+    AIC4plus <- get_AIC_nls(RSS4plus, 3, n)
+    results$Model4plus <- list(fit = fit4plus, AIC = AIC4plus, params = coef(fit4plus), RSS = RSS4plus)
+  }, error = function(e) { results$Model4plus <<- NULL })
+
+  return(results)
+}
+```
+
+# Growth + Preferential Attachment (Standard BA Model)
+
+## Load degree sequence
+
+```{r}
+# Load degree sequence for BA model with preferential attachment
+degree_file_PA <- "results_deg/degrees_ba_preferential.txt"
+m0_PA <- 5
+
+if (file.exists(degree_file_PA)) {
+  degree_sequence_PA <- scan(degree_file_PA, what = double())
+  degree_sequence_PA <- degree_sequence_PA[degree_sequence_PA >= 1]
+  k_min_PA <- min(degree_sequence_PA)
+
+  cat("k_min:", k_min_PA, "\n")
+  cat("Length", length(degree_sequence_PA), "\n")
+  cat("Max degree:", max(degree_sequence_PA), "\n")
+  cat("Mean degree:", mean(degree_sequence_PA), "\n\n")
+
+  N_PA <- length(degree_sequence_PA)
+  M_PA <- sum(degree_sequence_PA)
+  M_prime_PA <- sum(log(degree_sequence_PA))
+  C_PA <- sum(lfactorial(degree_sequence_PA))
+  max_deg_PA <- max(degree_sequence_PA)
+
+} else {
+  cat("Warning:", degree_file_PA, "not found\n")
+  degree_sequence_PA <- NULL
+}
+```
+
+## Model selection for degree distribution
+
+```{r}
+# Fit and compare candidate distributions to the degree sequence
+if (!is.null(degree_sequence_PA)) {
+  M_over_N_PA <- M_PA / N_PA
+  N_over_M_PA <- 1 / M_over_N_PA
+
+  mll_zeta_PA <- create_minus_log_likelihood_zeta(M_prime_PA, N_PA, k_min_PA)
+  mll_pois_PA <- create_minus_log_likelihood_poisson(M_PA, C_PA, N_PA)
+  mll_geom_PA <- create_minus_log_likelihood_geom(M_PA, N_PA, k_min_PA)
+  mll_ztrunc_PA <- create_minus_log_likelihood_right_trunc_zeta(M_prime_PA, N_PA, k_min_PA)
+  mll_geomtrunc_PA <- create_minus_log_likelihood_right_trunc_geom(M_PA, N_PA, k_min_PA)
+
+  mle_zeta_PA <- mle(mll_zeta_PA, start = list(gamma = 3), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_pois_PA <- mle(mll_pois_PA, start = list(lambda = M_over_N_PA), method = "L-BFGS-B", lower = c(lambda = 1e-9))
+  mle_geom_PA <- mle(mll_geom_PA, start = list(q = N_over_M_PA), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+  mle_zeta_trunc_PA <- mle(function(gamma) mll_ztrunc_PA(gamma, k_max = max_deg_PA), start = list(gamma = 3), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_geom_trunc_PA <- mle(function(q) mll_geomtrunc_PA(q, k_max = max_deg_PA), start = list(q = N_over_M_PA), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+
+  m2logL_pois_PA <- attributes(summary(mle_pois_PA))$m2logL
+  m2logL_geom_PA <- attributes(summary(mle_geom_PA))$m2logL
+  m2logL_zeta_PA <- attributes(summary(mle_zeta_PA))$m2logL
+  m2logL_zetatrunc_PA <- attributes(summary(mle_zeta_trunc_PA))$m2logL
+  m2logL_geomtrunc_PA <- attributes(summary(mle_geom_trunc_PA))$m2logL
+
+  AIC_pois_PA <- get_AIC(m2logL_pois_PA, 1, N_PA)
+  AIC_geom_PA <- get_AIC(m2logL_geom_PA, 1, N_PA)
+  AIC_zeta_3_PA <- get_AIC(2 * mll_zeta_PA(gamma = 3), 0, N_PA)
+  AIC_zeta_PA <- get_AIC(m2logL_zeta_PA, 1, N_PA)
+  AIC_zetatrunc_PA <- get_AIC(m2logL_zetatrunc_PA, 2, N_PA)
+  AIC_geomtrunc_PA <- get_AIC(m2logL_geomtrunc_PA, 2, N_PA)
+
+  aic_table_PA <- data.frame(
+    Model =  c("Poisson", "Geometric", "Zeta (γ=3)", "Zeta", "Zeta Trunc", "Geom Trunc"),
+    AIC = c(AIC_pois_PA, AIC_geom_PA, AIC_zeta_3_PA, AIC_zeta_PA, AIC_zetatrunc_PA, AIC_geomtrunc_PA),
+    Parameters = c(
+      paste0("λ = ", round(coef(mle_pois_PA)[["lambda"]], 4)),
+      paste0("q = ", round(coef(mle_geom_PA)[["q"]], 4)),
+      "γ = 3",
+      paste0("γ = ", round(coef(mle_zeta_PA)[["gamma"]], 4)),
+      paste0("γ = ", round(coef(mle_zeta_trunc_PA)[["gamma"]], 4), ", kmax = ", max_deg_PA),
+      paste0("q = ", round(coef(mle_geom_trunc_PA)[["q"]], 4), ", kmax = ", max_deg_PA)
+    )
+  )
+
+  best_AIC_PA <- min(aic_table_PA$AIC)
+  aic_table_PA$DeltaAIC <- aic_table_PA$AIC - best_AIC_PA
+  aic_table_PA$Best <- ifelse(aic_table_PA$DeltaAIC == 0, "***", "")
+
+  print(aic_table_PA)
+  cat("Best model:", aic_table_PA$Model[which.min(aic_table_PA$AIC)])
+}
+```
+
+## Plot degree distribution with best fit
+
+```{r}
+# Plot empirical and fitted degree distributions on log-log scale
+if (!is.null(degree_sequence_PA)) {
+  tab <- table(degree_sequence_PA)
+  degrees_obs <- as.integer(names(tab))
+  counts <- as.numeric(tab)
+  P_emp <- counts / sum(counts)
+
+  best_idx <- which.min(aic_table_PA$AIC)
+  best_model_name <- aic_table_PA$Model[best_idx]
+
+  support <- k_min_PA:max_deg_PA
+
+  if (best_model_name == "Poisson") {
+    lambda_best <- coef(mle_pois_PA)[["lambda"]]
+    pmf_fitted <- d_pois(support, lambda_best)
+  } else if (best_model_name == "Geometric") {
+    q_best <- coef(mle_geom_PA)[["q"]]
+    pmf_fitted <- d_geom(support, q_best)
+  } else if (best_model_name == "Zeta (γ=3)") {
+    pmf_fitted <- d_zeta(support, 3, k_min_PA)
+  } else if (best_model_name == "Zeta") {
+    gamma_best <- coef(mle_zeta_PA)[["gamma"]]
+    pmf_fitted <- d_zeta(support, gamma_best, k_min_PA)
+  } else if (best_model_name == "Zeta Trunc") {
+    gamma_best <- coef(mle_zeta_trunc_PA)[["gamma"]]
+    pmf_fitted <- d_zeta_trunc(support, gamma_best, k_min_PA, max_deg_PA)
+  } else if (best_model_name == "Geom Trunc") {
+    q_best <- coef(mle_geom_trunc_PA)[["q"]]
+    pmf_fitted <- d_geom_trunc(support, q_best, max_deg_PA)
+  }
+
+  pmf_fitted <- pmf_fitted / sum(pmf_fitted)
+
+  df_plot <- data.frame(
+    k = rep(degrees_obs, 2),
+    Probability = c(P_emp, pmf_fitted[degrees_obs]),
+    Type = factor(rep(c("Empirical", "Fitted"), each = length(degrees_obs)), levels = c("Empirical", "Fitted"))
+  )
+
+  p <- ggplot(df_plot, aes(x = k, y = Probability, color = Type, shape = Type)) +
+    geom_point(size = 2) +
+    geom_line(data = df_plot[df_plot$Type == "Fitted", ], linewidth = 0.8) +
+    scale_x_log10() +
+    scale_y_log10() +
+    scale_color_manual(values = c("Empirical" = "blue", "Fitted" = "red")) +
+    scale_shape_manual(values = c("Empirical" = 16, "Fitted" = NA)) +
+    labs(
+      title = "Degree Distribution (Growth + Preferential Attachment)",
+      subtitle = paste0("Best model: ", best_model_name, " (loglog scale)"),
+      x = "Degree k",
+      y = "P(k)"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+
+  print(p)
+}
+```
+
+## Load time series
+
+```{r}
+# Load time series of degree evolution for selected vertices
+arrival_times <- c(1, 10, 100, 1000)
+timeseries_files_PA <- paste0("results_v1_arr/mean_arrival_", arrival_times, "_ba_preferential.txt")
+
+timeseries_data_PA <- list()
+
+for (i in 1:length(timeseries_files_PA)) {
+  if (file.exists(timeseries_files_PA[i])) {
+    data <- read.table(timeseries_files_PA[i], header = FALSE)
+    data <- cbind(seq(arrival_times[i],100000,1), data)
+    colnames(data) <- c("time", "degree")
+    timeseries_data_PA[[i]] <- data
+    cat("Loaded", timeseries_files_PA[i], "with", nrow(data), "points\n")
+  } else {
+    cat("Warning:", timeseries_files_PA[i], "not found\n")
+    timeseries_data_PA[[i]] <- NULL
+  }
+}
+```
+
+## Visual comparison of $k_i'(t)$
+
+```{r}
+# Visualize rescaled degree evolution for different arrival times
+t.plot <- 1000:100000
+
+df <- data.frame(
+  t = rep(t.plot, 5),
+  k_rescaled = c(
+    m0_PA * t.plot^(1/2),
+    read.table(timeseries_files_PA[1], header = FALSE)[1000:100000, 1],
+    sqrt(10) * read.table(timeseries_files_PA[2], header = FALSE)[991:99991, 1],
+    sqrt(100) * read.table(timeseries_files_PA[3], header = FALSE)[901:99901, 1],
+    sqrt(1000) * read.table(timeseries_files_PA[4], header = FALSE)[1:99001, 1]
+  ),
+  Vertex = rep(c("Theoretical", "t_i = 1", "t_i = 10", "t_i = 100", "t_i = 1000"), each = length(t.plot))
+)
+
+ggplot(df, aes(x = t, y = k_rescaled, color = Vertex)) +
+  geom_point(size = 0.8, alpha = 0.7) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_color_manual(values = c("Theoretical" = "black", 
+                                 "t_i = 1" = "blue", 
+                                 "t_i = 10" = "red", 
+                                 "t_i = 100" = "darkgreen", 
+                                 "t_i = 1000" = "purple")) +
+  labs(title = "Visual comparison of the rescaled variant of k_i(t) in loglog scale",
+       x = "t",
+       y = expression("k_i'(t)"))
+```
+
+## Model selection for time series
+
+```{r}
+# Fit and compare growth models to each time series
+all_results_PA <- list()
+
+for (i in 1:length(timeseries_data_PA)) {
+  if (!is.null(timeseries_data_PA[[i]])) {
+    cat("\n### Vertex arriving at t =", arrival_times[i], "###\n")
+
+    results <- fit_all_growth_models(timeseries_data_PA[[i]], arrival_times[i])
+
+    if (!is.null(results) && length(results) > 0) {
+      model_names <- names(results)
+      aic_values <- sapply(results, function(x) x$AIC)
+
+      summary_table <- data.frame(
+        Model = model_names,
+        AIC = aic_values
+      )
+
+      summary_table <- summary_table[order(summary_table$AIC), ]
+      summary_table$DeltaAIC <- summary_table$AIC - min(summary_table$AIC)
+      summary_table$Best <- ifelse(summary_table$DeltaAIC == 0, "***", "")
+
+      print(summary_table)
+
+      cat("\nBest model:", summary_table$Model[1], "\n")
+      best_model <- results[[summary_table$Model[1]]]
+      cat("Parameters:", paste(names(best_model$params), "=", round(best_model$params, 4), collapse = ", "), "\n")
+
+      all_results_PA[[i]] <- list(
+        ti = arrival_times[i],
+        results = results,
+        summary = summary_table
+      )
+    }
+  }
+}
+```
+
+## Plot time series with best fit and theoretical curve
+
+```{r}
+# Plot time series data, best fit, and theoretical curve for each vertex
+for (i in 1:length(all_results_PA)) {
+  if (!is.null(all_results_PA[[i]])) {
+    ti <- all_results_PA[[i]]$ti
+    data <- timeseries_data_PA[[i]]
+    data <- data[data$time >= ti, ]
+
+    best_model_name <- all_results_PA[[i]]$summary$Model[1]
+    best_fit <- all_results_PA[[i]]$results[[best_model_name]]$fit
+
+    data$theoretical <- m0_PA * sqrt(data$time / ti)
+
+    p <- ggplot(data, aes(x = time)) +
+      geom_point(aes(y = degree), color = "blue", size = 2, alpha = 0.6) +
+      geom_line(aes(y = fitted(best_fit)), color = "red", linewidth = 1, linetype = "solid") +
+      geom_line(aes(y = theoretical), color = "green", linewidth = 1, linetype = "dashed")  +
+    scale_x_log10() +
+    scale_y_log10() +
+      labs(
+        title = paste0("Vertex arriving at t = ", ti),
+        subtitle = paste0("Best fit: ", best_model_name, " | Theoretical: k(t) = m0(t/t_i)^(1/2) | loglog scale"),
+        x = "Time t",
+        y = "Degree k(t)"
+      ) +
+      theme_minimal() +
+      annotate("text", x = max(data$time) * 0.3, y = max(data$degree) * 0.7,
+               label = "Blue: Data | Red: Best fit | Green: Theory",
+               color = "black", size = 3)
+
+    print(p)
+    
+    output_dir <- "PA_Plots"
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir)
+    }
+
+    file_name <- paste0(output_dir, "/plot_ti_", ti, ".png")
+    ggsave(file_name, plot = p, width = 8, height = 6, units = "in")
+  }
+}
+```
+
+# Growth + Random Attachment
+
+## Load degree sequence
+
+```{r}
+# Load degree sequence for BA model with random attachment
+degree_file_RA <- "results_deg/degrees_ba_random.txt"
+
+m0_RA <- 5
+n0_RA <- 10
+
+if (file.exists(degree_file_RA)) {
+  degree_sequence_RA <- scan(degree_file_RA, what = double())
+  degree_sequence_RA <- degree_sequence_RA[degree_sequence_RA >= 1]
+  k_min_RA <- min(degree_sequence_RA)
+
+  cat("k_min:", k_min_RA, "\n")
+  cat("Loaded", length(degree_sequence_RA), "degrees\n")
+  cat("Max degree:", max(degree_sequence_RA), "\n")
+  cat("Mean degree:", mean(degree_sequence_RA), "\n\n")
+
+  N_RA <- length(degree_sequence_RA)
+  M_RA <- sum(degree_sequence_RA)
+  M_prime_RA <- sum(log(degree_sequence_RA))
+  C_RA <- sum(lfactorial(degree_sequence_RA))
+  max_deg_RA <- max(degree_sequence_RA)
+
+} else {
+  cat("Warning:", degree_file_RA, "not found\n")
+  degree_sequence_RA <- NULL
+}
+```
+
+## Model selection for degree distribution
+
+```{r}
+# Fit and compare candidate distributions to the degree sequence
+if (!is.null(degree_sequence_RA)) {
+  M_over_N_RA <- M_RA / N_RA
+  N_over_M_RA <- 1 / M_over_N_RA
+
+  mll_zeta_RA <- create_minus_log_likelihood_zeta(M_prime_RA, N_RA, k_min_RA)
+  mll_pois_RA <- create_minus_log_likelihood_poisson(M_RA, C_RA, N_RA)
+  mll_geom_RA <- create_minus_log_likelihood_geom(M_RA, N_RA, k_min_RA)
+  mll_ztrunc_RA <- create_minus_log_likelihood_right_trunc_zeta(M_prime_RA, N_RA, k_min_RA)
+  mll_geomtrunc_RA <- create_minus_log_likelihood_right_trunc_geom(M_RA, N_RA, k_min_RA)
+
+  mle_zeta_RA <- mle(mll_zeta_RA, start = list(gamma = 3), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_pois_RA <- mle(mll_pois_RA, start = list(lambda = M_over_N_RA), method = "L-BFGS-B", lower = c(lambda = 1e-9))
+  mle_geom_RA <- mle(mll_geom_RA, start = list(q = N_over_M_RA), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+  mle_zeta_trunc_RA <- mle(function(gamma) mll_ztrunc_RA(gamma, k_max = max_deg_RA), start = list(gamma = 3), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_geom_trunc_RA <- mle(function(q) mll_geomtrunc_RA(q, k_max = max_deg_RA), start = list(q = N_over_M_RA), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+
+  m2logL_pois_RA <- attributes(summary(mle_pois_RA))$m2logL
+  m2logL_geom_RA <- attributes(summary(mle_geom_RA))$m2logL
+  m2logL_zeta_RA <- attributes(summary(mle_zeta_RA))$m2logL
+  m2logL_zetatrunc_RA <- attributes(summary(mle_zeta_trunc_RA))$m2logL
+  m2logL_geomtrunc_RA <- attributes(summary(mle_geom_trunc_RA))$m2logL
+
+
+  AIC_pois_RA <- get_AIC(m2logL_pois_RA, 1, N_RA)
+  AIC_geom_RA <- get_AIC(m2logL_geom_RA, 1, N_RA)
+  AIC_zeta_RA <- get_AIC(m2logL_zeta_RA, 1, N_RA)
+  AIC_zetatrunc_RA <- get_AIC(m2logL_zetatrunc_RA, 2, N_RA)
+  AIC_geomtrunc_RA <- get_AIC(m2logL_geomtrunc_RA, 2, N_RA)
+
+
+  aic_table_RA <- data.frame(
+    Model = c("Poisson", "Geometric", "Zeta", "Zeta Trunc", "Geom Trunc"),
+    AIC = c(AIC_pois_RA, AIC_geom_RA, AIC_zeta_RA, AIC_zetatrunc_RA, AIC_geomtrunc_RA),
+    Parameters = c(
+      paste0("λ = ", round(coef(mle_pois_RA)[["lambda"]], 4)),
+      paste0("q = ", round(coef(mle_geom_RA)[["q"]], 4)),
+      paste0("γ = ", round(coef(mle_zeta_RA)[["gamma"]], 4)),
+      paste0("γ = ", round(coef(mle_zeta_trunc_RA)[["gamma"]], 4), ", kmax = ", max_deg_RA),
+      paste0("q = ", round(coef(mle_geom_trunc_RA)[["q"]], 4), ", kmax = ", max_deg_RA)
+    )
+  )
+
+  best_AIC_RA <- min(aic_table_RA$AIC)
+  aic_table_RA$DeltaAIC <- aic_table_RA$AIC - best_AIC_RA
+  aic_table_RA$Best <- ifelse(aic_table_RA$DeltaAIC == 0, "***", "")
+
+  print(aic_table_RA)
+  cat("\nBest model:", aic_table_RA$Model[which.min(aic_table_RA$AIC)], "\n\n")
+}
+```
+
+## Plot degree distribution with best fit
+
+```{r}
+# Plot empirical and fitted degree distributions for random attachment
+if (!is.null(degree_sequence_RA)) {
+  tab <- table(degree_sequence_RA)
+  degrees_obs <- as.integer(names(tab))
+  counts <- as.numeric(tab)
+  P_emp <- counts / sum(counts)
+
+  best_idx <- which.min(aic_table_RA$AIC)
+  best_model_name <- aic_table_RA$Model[best_idx]
+  
+  support <- k_min_RA:max_deg_RA
+
+  if (best_model_name == "Poisson") {
+    lambda_best <- coef(mle_pois_RA)[["lambda"]]
+    pmf_fitted <- d_pois(support, lambda_best)
+  } else if (best_model_name == "Geometric") {
+    q_best <- coef(mle_geom_RA)[["q"]]
+    pmf_fitted <- d_geom(support, q_best)
+  } else if (best_model_name == "Zeta") {
+    gamma_best <- coef(mle_zeta_RA)[["gamma"]]
+    pmf_fitted <- d_zeta(support, gamma_best, k_min_RA)
+  } else if (best_model_name == "Zeta Trunc") {
+    gamma_best <- coef(mle_zeta_trunc_RA)[["gamma"]]
+    pmf_fitted <- d_zeta_trunc(support, gamma_best, k_min_RA, max_deg_RA)
+  } else if (best_model_name == "Geom Trunc") {
+    q_best <- coef(mle_geom_trunc_RA)[["q"]]
+    pmf_fitted <- d_geom_trunc(support, q_best, max_deg_RA)
+  }
+
+  pmf_fitted <- pmf_fitted / sum(pmf_fitted)
+
+  df_plot <- data.frame(
+    k = rep(degrees_obs, 2),
+    Probability = c(P_emp, pmf_fitted[degrees_obs]),
+    Type = factor(rep(c("Empirical", "Fitted"), each = length(degrees_obs)), levels = c("Empirical", "Fitted"))
+  )
+
+  p <- ggplot(df_plot, aes(x = k, y = Probability, color = Type, shape = Type)) +
+    geom_point(size = 2) +
+    geom_line(data = df_plot[df_plot$Type == "Fitted", ], linewidth = 0.8) +
+    scale_y_log10() +
+    #scale_x_log10() +
+    scale_color_manual(values = c("Empirical" = "blue", "Fitted" = "red")) +
+    scale_shape_manual(values = c("Empirical" = 16, "Fitted" = NA)) +
+    labs(
+      title = "Degree Distribution (Growth + Random Attachment)",
+      subtitle = paste0("Best model: ", best_model_name, " (lin-log scale)"),
+      x = "Degree k",
+      y = "P(k)"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+
+  print(p)
+}
+```
+
+## Load time series
+
+```{r}
+# Load time series for random attachment model
+timeseries_files_RA <- paste0("results_v2_arr/mean_arrival_", arrival_times, "_ba_random.txt")
+
+timeseries_data_RA <- list()
+
+for (i in 1:length(timeseries_files_RA)) {
+  if (file.exists(timeseries_files_RA[i])) {
+    data <- read.table(timeseries_files_RA[i], header = FALSE)
+    data <- cbind(seq(arrival_times[i],100000,1), data)
+    colnames(data) <- c("time", "degree")
+    timeseries_data_RA[[i]] <- data
+    cat("Loaded", timeseries_files_RA[i], "with", nrow(data), "points\n")
+  } else {
+    cat("Warning:", timeseries_files_RA[i], "not found\n")
+    timeseries_data_RA[[i]] <- NULL
+  }
+}
+```
+
+## Visual comparison of $k_i''(t)$
+
+```{r}
+# Visualize rescaled degree evolution for random attachment
+t.plot <- 1000:100000
+
+df <- data.frame(
+  t = rep(t.plot, 5),
+  k_rescaled = c(
+    m0_RA * log(m0_RA+t.plot-1),
+    read.table(timeseries_files_RA[1], header = FALSE)[1000:100000, 1] + m0_RA*log(n0_RA+1-1) - m0_RA,
+    read.table(timeseries_files_RA[2], header = FALSE)[991:99991, 1]+ m0_RA*log(n0_RA+10-1) - m0_RA,
+    read.table(timeseries_files_RA[3], header = FALSE)[901:99901, 1]+ m0_RA*log(n0_RA+100-1) - m0_RA,
+    read.table(timeseries_files_RA[4], header = FALSE)[1:99001, 1]+ m0_RA*log(n0_RA+1000-1) - m0_RA),
+  Vertex = rep(c("Theoretical", "t_i = 1", "t_i = 10", "t_i = 100", "t_i = 1000"), each = length(t.plot))
+)
+
+ggplot(df, aes(x = t, y = k_rescaled, color = Vertex)) +
+  geom_point(size = 0.8, alpha = 0.7) +
+  scale_x_log10() +
+  scale_color_manual(values = c("Theoretical" = "black", 
+                                 "t_i = 1" = "blue", 
+                                 "t_i = 10" = "red", 
+                                 "t_i = 100" = "darkgreen", 
+                                 "t_i = 1000" = "purple")) +
+  labs(title = "Visual comparison of the rescaled variant of k_i(t) in log-lin scale",
+       x = "t",
+       y = expression("k_i''(t)"))
+```
+
+## Model selection for time series
+
+```{r}
+# Fit and compare growth models to each time series (random attachment)
+all_results_RA <- list()
+
+
+for (i in 1:length(timeseries_data_RA)) {
+  if (!is.null(timeseries_data_RA[[i]])) {
+    cat("\n### Vertex arriving at t =", arrival_times[i], "###\n")
+
+    results <- fit_all_growth_models(timeseries_data_RA[[i]], arrival_times[i])
+
+    if (!is.null(results) && length(results) > 0) {
+      model_names <- names(results)
+      aic_values <- sapply(results, function(x) x$AIC)
+
+      summary_table <- data.frame(
+        Model = model_names,
+        AIC = aic_values
+      )
+
+      summary_table <- summary_table[order(summary_table$AIC), ]
+      summary_table$DeltaAIC <- summary_table$AIC - min(summary_table$AIC)
+      summary_table$Best <- ifelse(summary_table$DeltaAIC == 0, "***", "")
+
+      print(summary_table)
+
+      cat("\nBest model:", summary_table$Model[1], "\n")
+      best_model <- results[[summary_table$Model[1]]]
+      cat("Parameters:", paste(names(best_model$params), "=", round(best_model$params, 4), collapse = ", "), "\n")
+
+      all_results_RA[[i]] <- list(
+        ti = arrival_times[i],
+        results = results,
+        summary = summary_table
+      )
+    }
+  }
+}
+```
+
+## Plot time series with best fit and theoretical curve
+
+```{r}
+# Plot time series data, best fit, and theoretical curve for each vertex (random attachment)
+for (i in 1:length(all_results_RA)) {
+  if (!is.null(all_results_RA[[i]])) {
+    ti <- all_results_RA[[i]]$ti
+    data <- timeseries_data_RA[[i]]
+    data <- data[data$time >= ti, ]
+
+    best_model_name <- all_results_RA[[i]]$summary$Model[1]
+    best_fit <- all_results_RA[[i]]$results[[best_model_name]]$fit
+    data$theoretical <- m0_RA * (log(m0_RA + data$time - 1) - log(n0_RA + ti - 1) + 1)
+    p <- ggplot(data, aes(x = time)) +
+      geom_point(aes(y = degree), color = "blue", size = 2, alpha = 0.6) +
+      geom_line(aes(y = fitted(best_fit)), color = "red", linewidth = 1, linetype = "solid") +
+      geom_line(aes(y = theoretical), color = "green", linewidth = 1, linetype = "dashed") +
+      scale_x_log10() +
+      labs(
+        title = paste0("Vertex arriving at t = ", ti),
+        subtitle = paste0("Best fit: ", best_model_name, " | Theoretical: logarithmic growth | log-lin scale"),
+        x = "Time t",
+        y = "Degree k(t)"
+      ) +
+      theme_minimal() +
+      annotate("text", x = max(data$time) * 0.2, y = max(data$degree) * 0.5,
+               label = "Blue: Data | Red: Best fit | Green: Theory",
+               color = "black", size = 3)
+    print(p)
+    
+    output_dir <- "RA_Plots"
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir)
+    }
+
+    file_name <- paste0(output_dir, "/plot_ti_", ti, ".png")
+    ggsave(file_name, plot = p, width = 8, height = 6, units = "in")
+  }
+}
+```
+
+# No Growth + Random Attachment
+
+## Load degree sequence
+
+```{r}
+# Load degree sequence for no-growth model
+degree_file_NG <- "results_deg/degrees_no_growth.txt"
+
+if (file.exists(degree_file_NG)) {
+  degree_sequence_NG <- scan(degree_file_NG, what = double())
+  degree_sequence_NG <- degree_sequence_NG[degree_sequence_NG >= 1]
+  k_min_NG <- min(degree_sequence_NG)
+
+  cat("k_min:", k_min_NG, "\n")
+  cat("Loaded", length(degree_sequence_NG), "degrees\n")
+  cat("Max degree:", max(degree_sequence_NG), "\n")
+  cat("Mean degree:", mean(degree_sequence_NG), "\n\n")
+
+  N_NG <- length(degree_sequence_NG)
+  M_NG <- sum(degree_sequence_NG)
+  M_prime_NG <- sum(log(degree_sequence_NG))
+  C_NG <- sum(lfactorial(degree_sequence_NG))
+  max_deg_NG <- max(degree_sequence_NG)
+
+} else {
+  cat("Warning:", degree_file_NG, "not found\n")
+  degree_sequence_NG <- NULL
+}
+```
+
+## Model selection for degree distribution
+
+```{r}
+# Fit and compare candidate distributions to the degree sequence (no growth)
+if (!is.null(degree_sequence_NG)) {
+  M_over_N_NG <- M_NG / N_NG
+  N_over_M_NG <- 1 / M_over_N_NG
+  S_NG <- sum((degree_sequence_NG - mean(degree_sequence_NG))^2)
+  
+  mll_zeta_NG <- create_minus_log_likelihood_zeta(M_prime_NG, N_NG, k_min_NG)
+  mll_pois_NG <- create_minus_log_likelihood_poisson(M_NG, C_NG, N_NG)
+  mll_geom_NG <- create_minus_log_likelihood_geom(M_NG, N_NG, k_min_NG)
+  mll_ztrunc_NG <- create_minus_log_likelihood_right_trunc_zeta(M_prime_NG, N_NG, k_min_NG)
+  mll_gaussian_NG <- create_minus_log_likelihood_gaussian(M_NG, S_NG, N_NG)
+  mll_geomtrunc_NG <- create_minus_log_likelihood_right_trunc_geom(M_NG, N_NG, k_min_NG)
+  
+  mle_zeta_NG <- mle(mll_zeta_NG, start = list(gamma = 2), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_pois_NG <- mle(mll_pois_NG, start = list(lambda = M_over_N_NG), method = "L-BFGS-B", lower = c(lambda = 1e-9))
+  mle_geom_NG <- mle(mll_geom_NG, start = list(q = N_over_M_NG), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+  mle_zeta_trunc_NG <- mle(function(gamma) mll_ztrunc_NG(gamma, k_max = max_deg_NG), start = list(gamma = 2), method = "L-BFGS-B", lower = c(gamma = 1 + 1e-9))
+  mle_geom_trunc_NG <- mle(function(q) mll_geomtrunc_NG(q, k_max = max_deg_NG), start = list(q = N_over_M_NG), method = "L-BFGS-B", lower = c(q = 1e-9), upper = c(q = 1 - 1e-9))
+  
+  mll_gaussian_wrapper <- function(par) {
+    mll_gaussian_NG(mu = par[1], sigma = par[2])
+  }
+  
+  opt_gaussian_NG <- optim(
+    par = c(mean(degree_sequence_NG), sd(degree_sequence_NG)),
+    fn = mll_gaussian_wrapper,
+    method = "L-BFGS-B",
+    lower = c(-Inf, 1e-6),
+    hessian = FALSE
+  )
+  
+  m2logL_pois_NG <- attributes(summary(mle_pois_NG))$m2logL
+  m2logL_geom_NG <- attributes(summary(mle_geom_NG))$m2logL
+  m2logL_zeta_NG <- attributes(summary(mle_zeta_NG))$m2logL
+  m2logL_zetatrunc_NG <- attributes(summary(mle_zeta_trunc_NG))$m2logL
+  m2logL_gaussian_NG <- 2 * opt_gaussian_NG$value
+  m2logL_geomtrunc_NG <- attributes(summary(mle_geom_trunc_NG))$m2logL
+  
+  AIC_pois_NG <- get_AIC(m2logL_pois_NG, 1, N_NG)
+  AIC_geom_NG <- get_AIC(m2logL_geom_NG, 1, N_NG)
+  AIC_zeta_NG <- get_AIC(m2logL_zeta_NG, 1, N_NG)
+  AIC_zetatrunc_NG <- get_AIC(m2logL_zetatrunc_NG, 2, N_NG)
+  AIC_gaussian_NG <- get_AIC(m2logL_gaussian_NG, 2, N_NG)
+  AIC_geomtrunc_NG <- get_AIC(m2logL_geomtrunc_NG, 2, N_NG)
+  
+  aic_table_NG <- data.frame(
+    Model = c("Poisson", "Geometric", "Zeta", "Zeta Trunc", "Gaussian", "Geom Trunc"),
+    AIC = c(AIC_pois_NG, AIC_geom_NG, AIC_zeta_NG, AIC_zetatrunc_NG, AIC_gaussian_NG, AIC_geomtrunc_NG),
+    Parameters = c(
+      paste0("λ = ", round(coef(mle_pois_NG)[["lambda"]], 4)),
+      paste0("q = ", round(coef(mle_geom_NG)[["q"]], 4)),
+      paste0("γ = ", round(coef(mle_zeta_NG)[["gamma"]], 4)),
+      paste0("γ = ", round(coef(mle_zeta_trunc_NG)[["gamma"]], 4), ", kmax = ", max_deg_NG),
+      paste0("μ = ", round(opt_gaussian_NG$par[1], 4), ", σ = ", round(opt_gaussian_NG$par[2], 4)),
+      paste0("q = ", round(coef(mle_geom_trunc_NG)[["q"]], 4), ", kmax = ", max_deg_NG)
+    )
+  )
+  
+  best_AIC_NG <- min(aic_table_NG$AIC)
+  aic_table_NG$DeltaAIC <- aic_table_NG$AIC - best_AIC_NG
+  aic_table_NG$Best <- ifelse(aic_table_NG$DeltaAIC == 0, "***", "")
+  
+  print(aic_table_NG)
+  cat("\nBest model:", aic_table_NG$Model[which.min(aic_table_NG$AIC)], "\n\n")
+}
+```
+
+## Plot degree distribution with best fit
+
+```{r}
+# Plot empirical and fitted degree distributions for no-growth model
+if (!is.null(degree_sequence_NG)) {
+  tab <- table(degree_sequence_NG)
+  degrees_obs <- as.integer(names(tab))
+  counts <- as.numeric(tab)
+  P_emp <- counts / sum(counts)
+
+  best_idx <- which.min(aic_table_NG$AIC)
+  best_model_name <- aic_table_NG$Model[best_idx]
+
+  support <- k_min_NG:max_deg_NG
+
+  if (best_model_name == "Poisson") {
+    lambda_best <- coef(mle_pois_NG)[["lambda"]]
+    pmf_fitted <- d_pois(support, lambda_best)
+  } else if (best_model_name == "Geometric") {
+    q_best <- coef(mle_geom_NG)[["q"]]
+    pmf_fitted <- d_geom(support, q_best)
+  } else if (best_model_name == "Zeta") {
+    gamma_best <- coef(mle_zeta_NG)[["gamma"]]
+    pmf_fitted <- d_zeta(support, gamma_best, k_min_NG)
+  } else if (best_model_name == "Zeta Trunc") {
+    gamma_best <- coef(mle_zeta_trunc_NG)[["gamma"]]
+    pmf_fitted <- d_zeta_trunc(support, gamma_best, k_min_NG, max_deg_NG)
+  } else if (best_model_name == "Gaussian") {
+    mu_best <- opt_gaussian_NG$par[1]
+    sigma_best <- opt_gaussian_NG$par[2]
+    pmf_fitted <- d_gaussian(support, mu_best, sigma_best)
+  } else if (best_model_name == "Geom Trunc") {
+    q_best <- coef(mle_geom_trunc_NG)[["q"]]
+    pmf_fitted <- d_geom_trunc(support, q_best, max_deg_NG)
+  }
+
+  pmf_fitted <- pmf_fitted / sum(pmf_fitted)
+
+  df_plot <- data.frame(
+    k = rep(degrees_obs, 2),
+    Probability = c(P_emp, pmf_fitted[degrees_obs]),
+    Type = factor(rep(c("Empirical", "Fitted"), each = length(degrees_obs)), levels = c("Empirical", "Fitted"))
+  )
+
+  p <- ggplot(df_plot, aes(x = k, y = Probability, color = Type, shape = Type)) +
+    geom_point(size = 2) +
+    geom_line(data = df_plot[df_plot$Type == "Fitted", ], linewidth = 0.8) +
+    scale_color_manual(values = c("Empirical" = "blue", "Fitted" = "red")) +
+    scale_shape_manual(values = c("Empirical" = 16, "Fitted" = NA)) +
+    labs(
+      title = "Degree Distribution (No Growth + Preferential Attachment)",
+      subtitle = paste0("Best model: ", best_model_name),
+      x = "Degree k",
+      y = "P(k)"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+
+  print(p)
+}
+```
+
+## Load time series
+
+```{r}
+# Load time series for no-growth model
+timeseries_file_NG <- "results/results_v3/mean_degree_evolution_no_growth.txt"
+timeseries_data_NG <- list()
+
+if (file.exists(timeseries_file_NG)) {
+  data <- read.table(timeseries_file_NG, header = FALSE)
+  
+  for (i in 1:nrow(data)) {
+    sequence <- as.numeric(data[i, ]) 
+    df <- data.frame(time = 1:length(sequence), degree = sequence)
+    timeseries_data_NG[[i]] <- df
+    cat("Loaded sequence", i, "from", timeseries_file_NG, "with", length(sequence), "points\n")
+  }
+} else {
+  cat("Warning:", timeseries_file_NG, "not found\n")
+}
+```
+
+## Visual check of $k_i(t)$
+
+```{r}
+# Visualize degree evolution for random points in no-growth model
+m0_NG = 5
+n0_NG = 1000
+t.plot_NG = 1:20000
+
+df <- data.frame(
+  t = rep(t.plot_NG, 5),
+  k_rescaled = c(
+    2 * m0_NG / n0_NG * t.plot_NG,
+    timeseries_data_NG[[1]][1:20000, 2],
+    timeseries_data_NG[[2]][1:20000, 2],
+    timeseries_data_NG[[3]][1:20000, 2],
+    timeseries_data_NG[[4]][1:20000, 2]
+  ),
+  Vertex = rep(c("Theoretical", "Random point 1", "Random point 2", "Random point 3", "Random point 4"), each = length(t.plot_NG))
+)
+
+ggplot(df, aes(x = t, y = k_rescaled, color = Vertex)) +
+  geom_point(size = 0.8, alpha = 0.7) +
+  scale_color_manual(values = c("Theoretical" = "black",
+                                 "Random point 1" = "blue",
+                                 "Random point 2" = "red",
+                                 "Random point 3" = "darkgreen",
+                                 "Random point 4" = "purple")) +
+  labs(title = "Visual comparison of the rescaled variant of k_i(t) in loglog scale",
+       x = "t",
+       y = expression("k_i(t)"))
+```
+
+## Model selection for time series
+
+```{r}
+# Fit and compare growth models to each time series (no growth)
+all_results_NG <- list()
+
+for (i in 1:length(timeseries_data_NG)) {
+  if (!is.null(timeseries_data_NG[[i]])) {
+    cat("\n### Random point", i, "###\n")
+
+    results <- fit_all_growth_models(timeseries_data_NG[[i]], 1)
+
+    if (!is.null(results) && length(results) > 0) {
+      model_names <- names(results)
+      aic_values <- sapply(results, function(x) x$AIC)
+
+      summary_table <- data.frame(
+        Model = model_names,
+        AIC = aic_values
+      )
+
+      summary_table <- summary_table[order(summary_table$AIC), ]
+      summary_table$DeltaAIC <- summary_table$AIC - min(summary_table$AIC)
+      summary_table$Best <- ifelse(summary_table$DeltaAIC == 0, "***", "")
+
+      print(summary_table)
+
+      cat("\nBest model:", summary_table$Model[1], "\n")
+      best_model <- results[[summary_table$Model[1]]]
+      cat("Parameters:", paste(names(best_model$params), "=", round(best_model$params, 6), collapse = ", "), "\n")
+
+      all_results_NG[[i]] <- list(
+        point = i,
+        results = results,
+        summary = summary_table
+      )
+    }
+  }
+}
+```
+
+## Plot time series with best fit and theoretical curve
+
+```{r}
+# Plot time series data, best fit, and theoretical curve for each random point (no growth)
+for (i in 1:length(all_results_NG)) {
+  if (!is.null(all_results_NG[[i]])) {
+    data <- timeseries_data_NG[[i]]
+    data <- data[data$time >= 1, ]
+
+    best_model_name <- all_results_NG[[i]]$summary$Model[1]
+    best_fit <- all_results_NG[[i]]$results[[best_model_name]]$fit
+
+    data$theoretical <- (2 * m0_NG / n0_NG) * data$time
+
+    p <- ggplot(data, aes(x = time)) +
+      geom_point(aes(y = degree), color = "blue", size = 2, alpha = 0.6) +
+      geom_line(aes(y = fitted(best_fit)), color = "red", linewidth = 1, linetype = "solid") +
+      geom_line(aes(y = theoretical), color = "green", linewidth = 1, linetype = "dashed") +
+      labs(
+        title = paste0("Random point ", i),
+        subtitle = paste0("Best fit: ", best_model_name, " | Theoretical: k(t) = (2m_0/n_0)t"),
+        x = "Time t",
+        y = "Degree k(t)"
+      ) +
+      theme_minimal() +
+      annotate("text", x = max(data$time) * 0.7, y = max(data$degree) * 0.9,
+               label = "Blue: Data | Red: Best fit | Green: Theory",
+               color = "black", size = 3)
+
+    print(p)
+    
+    output_dir <- "NG_Plots"
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir)
+    }
+
+    file_name <- paste0(output_dir, "/plot_ti_", ti, ".png")
+    ggsave(file_name, plot = p, width = 8, height = 6, units = "in")
+  }
+}
+```
+
+# Summary
+
+```{r}
+# Print summary of best models for each scenario
+cat("\n######### SUMMARY OF MODEL SELECTION #########\n\n")
+
+cat("Model 1: Growth + Preferential Attachment\n")
+cat("Expected: Degree dist → Zeta (γ=3) | Time series → Power-law (b≈0.5)\n")
+if (exists("aic_table_PA")) {
+  cat("Best degree model:", aic_table_PA$Model[which.min(aic_table_PA$AIC)], "\n")
+}
+if (length(all_results_PA) > 0) {
+  cat("Best time series models:\n")
+  for (i in 1:length(all_results_PA)) {
+    if (!is.null(all_results_PA[[i]])) {
+      cat("  t =", all_results_PA[[i]]$ti, "→", all_results_PA[[i]]$summary$Model[1], "\n")
+    }
+  }
+}
+
+cat("\n---\n\n")
+
+cat("Model 2: Growth + Random Attachment\n")
+cat("Expected: Degree dist → Geometric | Time series → Logarithmic\n")
+if (exists("aic_table_RA")) {
+  cat("Best degree model:", aic_table_RA$Model[which.min(aic_table_RA$AIC)], "\n")
+}
+if (length(all_results_RA) > 0) {
+  cat("Best time series models:\n")
+  for (i in 1:length(all_results_RA)) {
+    if (!is.null(all_results_RA[[i]])) {
+      cat("  t =", all_results_RA[[i]]$ti, "→", all_results_RA[[i]]$summary$Model[1], "\n")
+    }
+  }
+}
+
+cat("\n---\n\n")
+
+cat("Model 3: No Growth + Preferential Attachment\n")
+cat("Expected: Degree dist → Gaussian | Time series → Linear\n")
+if (exists("aic_table_NG")) {
+  cat("Best degree model:", aic_table_NG$Model[which.min(aic_table_NG$AIC)], "\n")
+  cat("Parameters:", aic_table_NG$Parameters[which.min(aic_table_NG$AIC)], "\n")
+}
+if (length(all_results_NG) > 0) {
+  cat("Best time series models (4 random vertices):\n")
+  for (i in 1:length(all_results_NG)) {
+    if (!is.null(all_results_NG[[i]])) {
+      best_model_name <- all_results_NG[[i]]$summary$Model[1]
+      best_params <- all_results_NG[[i]]$results[[best_model_name]]$params
+      cat("  Random point", i, "→", best_model_name,
+          " (", paste(names(best_params), "=", round(best_params, 6), collapse = ", "), ")\n")
+    }
+  }
+}
+
+cat("\n#######################################\n")
+```
