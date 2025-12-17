@@ -1,0 +1,896 @@
+---
+title: "Lab 6 – Finding and assessing community structure"
+author: "Boschetto Ilaria, Volpi Davide"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+fontsize: 11pt
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, 
+                      fig.width = 7, fig.height = 5)
+library(igraph)
+library(igraphdata)
+library(clustAnalytics)
+library(tidyverse)
+library(conflicted)
+set.seed(12345)
+conflict_prefer("union", "base")
+conflict_prefer("intersect", "base")
+conflict_prefer("setdiff", "base")
+```
+**Task 1:** Write an R function that, given two different clusterings of the same network, outputs a table of the Jaccard index between each of their clusters.
+
+The Jaccard index between two sets A and B is defined as: $J(A,B) = \frac{|A \cap B|}{|A \cup B|}$
+
+```{r}
+# Function to compute Jaccard similarity matrix between two clusterings
+# memb1: membership vector for first clustering
+# memb2: membership vector for second clustering
+# Returns: matrix where element (i,j) is Jaccard index between cluster i of 
+#          clustering 1 and cluster j of clustering 2
+jaccard_sim <- function(memb1, memb2) {
+  if(length(memb1) != length(memb2)) {
+    stop("Membership vectors must have the same length")
+  }
+  
+  # Get unique cluster labels for both clusterings
+  unique1 <- sort(unique(memb1))
+  unique2 <- sort(unique(memb2))
+  
+  # Initialize Jaccard similarity matrix
+  JS <- matrix(0, nrow = length(unique1), ncol = length(unique2),
+               dimnames = list(paste0("C1.", unique1), paste0("C2.", unique2)))
+  
+  # Compute Jaccard index for each pair of clusters
+  for(i in seq_along(unique1)) {
+    # Get indices of nodes in cluster i of clustering 1
+    A_idx <- which(memb1 == unique1[i])
+    
+    for(j in seq_along(unique2)) {
+      # Get indices of nodes in cluster j of clustering 2
+      B_idx <- which(memb2 == unique2[j])
+      
+      # Compute intersection and union
+      inter <- length(intersect(A_idx, B_idx))
+      uni <- length(union(A_idx, B_idx))
+      
+      # Jaccard index: |A ∩ B| / |A ∪ B|
+      JS[i, j] <- if(uni == 0) 0 else inter/uni
+    }
+  }
+  return(JS)
+}
+```
+
+
+
+**Task 2 :** Write a function that for each cluster of labeling 1, identifies which is the cluster of labeling 2 that is most similar according to the Jaccard index.
+
+```{r}
+# Function to match clusters based on maximum Jaccard similarity
+# JS: Jaccard similarity matrix from jaccard_sim()
+# name1, name2: names for the two clusterings (for output labeling)
+# Returns: list with pairs, column indices, and Jaccard values of best matches
+match_clusters <- function(JS, name1 = "L1", name2 = "L2") {
+  # For each row (cluster in clustering 1), find column with maximum Jaccard
+  best_cols <- apply(JS, 1, function(r) { 
+    if(all(is.nan(r))) NA else which.max(r) 
+  })
+  
+  # Create pair labels: (C1.i, C2.j) where j is best match for i
+  pairs <- mapply(function(r, c) {
+    paste0("(", name1, ".", rownames(JS)[r], ",", 
+           name2, ".", colnames(JS)[c], ")")
+  }, r = seq_len(nrow(JS)), c = best_cols, SIMPLIFY = TRUE)
+  
+  # Extract Jaccard values for best matches
+  values <- mapply(function(r, c) JS[r, c], 
+                   r = seq_len(nrow(JS)), c = best_cols)
+  names(values) <- pairs
+  
+  list(pairs = pairs, cols = best_cols, values = values)
+}
+```
+
+**Task 3:** Write a function that computes the weighted mean of the Jaccard indices, with weights given by the fraction of nodes in each cluster. This represents the global Jaccard similarity between two clusterings.
+
+```{r}
+# Function to compute weighted mean of Jaccard similarities
+# match_obj: output from match_clusters()
+# memb1: membership vector of first clustering (to compute weights)
+# Returns: weighted mean where weights are proportional to cluster sizes
+Wmean <- function(match_obj, memb1) {
+  unique1 <- sort(unique(memb1))
+  
+  # Compute size of each cluster in clustering 1
+  sizes <- sapply(unique1, function(label) sum(memb1 == label))
+  
+  # Weights are fractions: size_i / total_nodes
+  weights <- sizes / sum(sizes)
+  
+  # Weighted mean of Jaccard values
+  sum(weights * unname(match_obj$values))
+}
+```
+
+**Task 4:** Evaluate the significance of clusterings produced by different community detection methods on four networks using both scoring functions and Jaccard similarity.
+
+## Setup: Algorithms to Evaluate
+
+We evaluate at least: Louvain, Label Propagation, Walktrap, and Edge Betweenness.
+
+```{r}
+# List of community detection algorithms to evaluate
+alg_list <- list(
+  Louvain = function(g) cluster_louvain(g),
+  "Label Prop." = function(g) cluster_label_prop(g),
+  Walktrap = function(g) cluster_walktrap(g),
+  EdgeBetw = function(g) cluster_edge_betweenness(g)
+)
+```
+
+## Setup: Network Graphs
+
+1. Karate club (known ground truth)
+2. Synthetic network: 200 nodes, 800 edges, 4 communities with scale-free distribution
+3. ENRON network (converted to undirected simple weighted graph)
+4. A network of choice with no known community structure
+
+```{r}
+# Network 1: Karate Club (ground truth available)
+data(karate, package = "igraphdata")
+g_karate <- karate
+g_karate <- igraph::upgrade_graph(g_karate)
+memb_gt_karate <- V(g_karate)$Faction
+
+# Network 2: Synthetic network with 4 communities
+B <- matrix(0.3, 4, 4)  
+diag(B) <- 0.7          
+
+g_synth <- barabasi_albert_blocks(
+  m = 4,
+  p = c(0.25, 0.25, 0.25, 0.25),
+  B = B,
+  t_max = 200,
+  type = "Hajek",
+  sample_with_replacement = FALSE
+)
+
+memb_gt_synth <- V(g_synth)$label
+
+# Network 3: ENRON network
+data(enron, package = "igraphdata")
+g_enron <- as.undirected(enron, mode = "collapse")
+E(g_enron)$weight <- 1
+g_enron <- igraph::simplify(g_enron, remove.multiple = TRUE, remove.loops = TRUE, edge.attr.comb = list(weight='sum'))
+g_enron <- igraph::upgrade_graph(g_enron)
+
+# Network 4: Network of choice - Macaque Cortical Network
+data(macaque, package = "igraphdata")
+g_macaque <- macaque
+g_macaque <- as.undirected(g_macaque)
+g_macaque <- igraph::simplify(g_macaque)
+g_macaque <- igraph::upgrade_graph(g_macaque)
+
+
+# Store all graphs with their ground truth 
+graphs <- list(
+  karate = list(g = g_karate, gt = memb_gt_karate, name = "Karate Club"),
+  synth  = list(g = g_synth,  gt = memb_gt_synth, name = "Synthetic Network"),
+  enron  = list(g = g_enron,  gt = NULL, name = "ENRON Email Network"),
+  macaque = list(g = g_macaque, gt = NULL,name = "Macaque Cortical Network")
+)
+```
+
+## Comprehensive Evaluation Function
+
+**Note from PDF (page 6):** "Beware of random nature of some clustering algorithms (e.g. walktrap); hence... you should at least consider running the evaluation... several times and work with the averages."
+
+This function implements the complete evaluation pipeline:
+- Runs each algorithm multiple times (to handle randomness)
+- Computes significance scores using clustAnalytics
+- Determines reference clustering (ground truth or best-scoring)
+- Computes Jaccard similarities (local and global)
+
+```{r}
+evaluate_graph <- function(g, gt = NULL, alg_list = alg_list, n_reps = 5) {
+  
+  cat("\n=== Starting Evaluation ===\n")
+  cat("Graph size:", vcount(g), "nodes,", ecount(g), "edges\n")
+  
+  # Ensure ground truth matches graph size
+  if(!is.null(gt) && length(gt) != vcount(g)) {
+    warning(paste("Ground truth length", length(gt), 
+                  "does not match graph size", vcount(g), 
+                  "- ignoring ground truth"))
+    gt <- NULL
+  }
+  
+  # STEP 1: Run each algorithm n_reps times (to handle randomness - PDF page 6)
+  cat("\nStep 1: Running algorithms", n_reps, "times each...\n")
+  alg_results <- list()
+  for(alg_name in names(alg_list)) {
+    cat("  Running", alg_name, "...")
+    membs <- vector("list", n_reps)
+    for(r in seq_len(n_reps)) {
+      set.seed(1000 + r)
+      cl <- tryCatch(alg_list[[alg_name]](g), error = function(e) NULL)
+      membs[[r]] <- if(is.null(cl)) NA else membership(cl)
+    }
+    alg_results[[alg_name]] <- membs
+    cat(" done\n")
+  }
+
+  # STEP 2: Evaluate significance multiple times and average (PDF page 6)
+  # "you should at least consider running the evaluation of significance 
+  #  of these clustering algorithms several times and work with the averages"
+  cat("\nStep 2: Evaluating significance with scoring functions (", n_reps, "times)...\n")
+  
+  sig_tabs <- list()
+  for(r in seq_len(n_reps)) {
+    cat("  Repetition", r, "/", n_reps, "\n")
+    
+    alg_for_eval <- lapply(names(alg_list), function(a) {
+      function(graph) alg_list[[a]](graph)
+    })
+    names(alg_for_eval) <- names(alg_list)
+    
+    sig_tab_r <- tryCatch(
+      evaluate_significance(g, alg_list = alg_for_eval, gt_clustering = gt),
+      error = function(e) {
+        warning("evaluate_significance failed: ", e$message)
+        NULL
+      }
+    )
+    
+    sig_tabs[[r]] <- sig_tab_r
+  }
+  
+  # Compute average significance scores across repetitions
+  if(all(sapply(sig_tabs, is.null))) {
+    sig_tab_avg <- NULL
+    cat("  All significance evaluations failed\n")
+  } else {
+    # Remove NULL entries
+    sig_tabs <- sig_tabs[!sapply(sig_tabs, is.null)]
+    
+    # Average across repetitions
+    alg_names <- rownames(sig_tabs[[1]])
+    score_names <- colnames(sig_tabs[[1]])
+    
+    sig_tab_avg <- matrix(0, nrow = length(alg_names), ncol = length(score_names))
+    rownames(sig_tab_avg) <- alg_names
+    colnames(sig_tab_avg) <- score_names
+    
+    for(r in seq_along(sig_tabs)) {
+      sig_tab_avg <- sig_tab_avg + sig_tabs[[r]]
+    }
+    sig_tab_avg <- sig_tab_avg / length(sig_tabs)
+    sig_tab_avg <- as.data.frame(sig_tab_avg)
+    
+    cat("  Averaged scores across", length(sig_tabs), "successful runs\n")
+  }
+
+  # STEP 3: Determine reference clustering (PDF page 6)
+  # "Take as the reference clustering the ground truth, if it is known; 
+  #  or the best ranked clustering... otherwise."
+  cat("\nStep 3: Determining reference clustering...\n")
+  if(!is.null(gt)) {
+    ref_memb <- gt
+    ref_name <- "GroundTruth"
+    cat("  Using ground truth as reference\n")
+  } else if(!is.null(sig_tab_avg) && nrow(sig_tab_avg) > 0) {
+    # Find best algorithm based on AVERAGED modularity (high is best)
+    cat("  Available columns in sig_tab:", paste(colnames(sig_tab_avg), collapse = ", "), "\n")
+    
+    if("Modularity" %in% colnames(sig_tab_avg)) {
+      best_alg <- rownames(sig_tab_avg)[which.max(sig_tab_avg[, "Modularity"])]
+    } else if("modularity" %in% colnames(sig_tab_avg)) {
+      best_alg <- rownames(sig_tab_avg)[which.max(sig_tab_avg[, "modularity"])]
+    } else {
+      # Use first algorithm as fallback
+      best_alg <- rownames(sig_tab_avg)[1]
+    }
+    
+    # Verify the algorithm exists in our results
+    if(best_alg %in% names(alg_results)) {
+      ref_memb <- alg_results[[best_alg]][[1]]
+      ref_name <- paste0("BestByAvgScore_", best_alg)
+      cat("  Using best scoring algorithm (by average) as reference:", best_alg, "\n")
+    } else {
+      # Fallback to Louvain
+      ref_memb <- alg_results$Louvain[[1]]
+      ref_name <- "Louvain_fallback"
+      cat("  Best algorithm not found, using Louvain as fallback\n")
+    }
+  } else {
+    # Fallback to Louvain
+    ref_memb <- alg_results$Louvain[[1]]
+    ref_name <- "Louvain_fallback"
+    cat("  No significance table available, using Louvain as fallback\n")
+  }
+
+  # STEP 4: Calculate Jaccard similarities (local and global)
+  # This implements Tasks 1, 2, and 3 from the PDF
+  cat("\nStep 4: Computing Jaccard similarities...\n")
+  cat("  Reference has", length(ref_memb), "nodes\n")
+  
+  jaccard_list <- list()
+  global_js <- numeric()
+  
+  for(alg_name in names(alg_results)) {
+    memb <- alg_results[[alg_name]][[1]]
+    
+    # Check if membership is valid
+    if(length(memb) == 1 && is.na(memb)) {
+      jaccard_list[[alg_name]] <- NA
+      global_js[alg_name] <- NA
+      cat("  ", alg_name, ": FAILED (algorithm returned NA)\n")
+    } else if(is.null(memb)) {
+      jaccard_list[[alg_name]] <- NA
+      global_js[alg_name] <- NA
+      cat("  ", alg_name, ": FAILED (algorithm returned NULL)\n")
+    } else if(length(ref_memb) != length(memb)) {
+      warning(paste("Skipping", alg_name, "- membership length mismatch:",
+                    "reference has", length(ref_memb), "but algorithm has", length(memb)))
+      jaccard_list[[alg_name]] <- NA
+      global_js[alg_name] <- NA
+      cat("  ", alg_name, ": LENGTH MISMATCH (ref:", length(ref_memb), 
+          "vs alg:", length(memb), ")\n")
+    } else {
+      tryCatch({
+        # Task 1: Compute Jaccard similarity matrix
+        JS <- jaccard_sim(ref_memb, memb)
+        
+        # Task 2: Match clusters based on maximum Jaccard
+        mobj <- match_clusters(JS, name1 = ref_name, name2 = alg_name)
+        
+        # Task 3: Compute weighted mean (global Jaccard similarity)
+        gmean <- Wmean(mobj, ref_memb)
+        
+        jaccard_list[[alg_name]] <- list(JS = JS, match = mobj)
+        global_js[alg_name] <- gmean
+        cat("  ", alg_name, ": Global Jaccard =", round(gmean, 4), 
+            " (", length(unique(memb)), "clusters )\n")
+      }, error = function(e) {
+        warning(paste("Error computing Jaccard for", alg_name, ":", e$message))
+        jaccard_list[[alg_name]] <<- NA
+        global_js[alg_name] <<- NA
+        cat("  ", alg_name, ": ERROR -", e$message, "\n")
+      })
+    }
+  }
+
+  list(
+    alg_results = alg_results,
+    sig_tab = sig_tab_avg,  # Return averaged significance table
+    sig_tabs_all = sig_tabs,  # Keep all individual runs for reference
+    ref = list(memb = ref_memb, name = ref_name),
+    jaccard = jaccard_list,
+    global_js = global_js
+  )
+}
+```
+
+## Run Evaluation on All Networks
+
+```{r}
+# Run evaluation on all four networks
+results <- list()
+for(gname in names(graphs)) {
+  cat("\n\n")
+  cat("########################################################\n")
+  cat("### EVALUATING GRAPH:", graphs[[gname]]$name, "###\n")
+  cat("########################################################\n")
+  
+  results[[gname]] <- tryCatch({
+    evaluate_graph(
+      graphs[[gname]]$g,
+      gt = graphs[[gname]]$gt,
+      alg_list = alg_list,
+      n_reps = 5
+    )
+  }, error = function(e) {
+    cat("ERROR evaluating", gname, ":", e$message, "\n")
+    list(
+      alg_results = list(),
+      sig_tab = NULL,
+      ref = list(memb = NULL, name = "ERROR"),
+      jaccard = list(),
+      global_js = numeric()
+    )
+  })
+}
+
+
+cat("\n\n=== DEBUGGING SUMMARY ===\n")
+for(gname in names(results)) {
+  cat("\nGraph:", gname, "\n")
+  cat("  Reference:", results[[gname]]$ref$name, "\n")
+  cat("  Global JS length:", length(results[[gname]]$global_js), "\n")
+  if(length(results[[gname]]$global_js) > 0) {
+    cat("  Global JS values:\n")
+    print(results[[gname]]$global_js)
+  }
+}
+```
+
+# Results and Analysis
+
+## Detailed Results for Each Network
+
+### Karate Network
+
+```{r results='asis'}
+cat("\n\n## Network:", graphs[['karate']]$name, "\n\n")
+res <- results[['karate']]
+
+cat("### Significance Scores\n\n")
+cat("Reference clustering:", res$ref$name, "\n\n")
+
+if (!is.null(res$sig_tab)) {
+
+  wanted_rows <- c("modularity",
+                   "conductance",
+                   "clustering coef",
+                   "VIdist_to_GT")
+
+  keep_rows <- intersect(wanted_rows, rownames(res$sig_tab))
+
+  print(knitr::kable(res$sig_tab[keep_rows, , drop = FALSE],
+                     caption = paste("Significance scores for",
+                                     graphs[['karate']]$name),
+                     digits = 4))
+  cat("\n\n")
+} else {
+  cat("Significance evaluation not available.\n\n")
+}
+
+# Print global Jaccard scores
+cat("### Global Jaccard Similarity Scores\n\n")
+js_df <- data.frame(
+  Algorithm = names(res$global_js),
+  Global_Jaccard = round(res$global_js, 4)
+)
+print(knitr::kable(js_df, row.names = FALSE))
+cat("\n\n")
+
+
+cat("### Local Jaccard Similarities (Cluster-by-Cluster)\n\n")
+
+for(alg in names(res$jaccard)) {
+  if(is.list(res$jaccard[[alg]])) {
+    
+    cat("#### Algorithm:", alg, "\n\n")
+    
+    JS <- res$jaccard[[alg]]$JS
+    MC <- res$jaccard[[alg]]$match
+    
+    
+    cat("> JS <- jaccard_sim(...)\n")
+    cat("> JS\n")
+    print(JS)
+    cat("\n")
+    
+    
+    cat("> MC <- match_clusters(JS, name1=\"", res$ref$name,
+        "\", name2=\"", alg, "\")\n", sep="")
+    cat("> MC\n")
+    print(MC$values)
+    cat("\n")
+    
+    
+    wmean_val <- mean(MC$values)
+    cat("> wmean(MC)\n")
+    cat(wmean_val, "\n\n")
+  }
+}
+```
+
+### Syntethic Network 
+```{r}
+cat("\n\n## Network:", graphs[['synth']]$name, "\n\n")
+res <- results[['synth']]
+
+cat("### Significance Scores\n\n")
+cat("Reference clustering:", res$ref$name, "\n\n")
+
+if (!is.null(res$sig_tab)) {
+
+  wanted_rows <- c("modularity",
+                   "conductance",
+                   "clustering coef",
+                   "VIdist_to_GT")
+
+  keep_rows <- intersect(wanted_rows, rownames(res$sig_tab))
+
+  print(knitr::kable(res$sig_tab[keep_rows, , drop = FALSE],
+                     caption = paste("Significance scores for",
+                                     graphs[['synth']]$name),
+                     digits = 4))
+  cat("\n\n")
+} else {
+  cat("Significance evaluation not available.\n\n")
+}
+
+# Print global Jaccard scores
+cat("### Global Jaccard Similarity Scores\n\n")
+js_df <- data.frame(
+  Algorithm = names(res$global_js),
+  Global_Jaccard = round(res$global_js, 4)
+)
+print(knitr::kable(js_df, row.names = FALSE))
+cat("\n\n")
+
+
+cat("### Local Jaccard Similarities (Cluster-by-Cluster)\n\n")
+
+for(alg in names(res$jaccard)) {
+  if(is.list(res$jaccard[[alg]])) {
+    
+    cat("#### Algorithm:", alg, "\n\n")
+    
+    JS <- res$jaccard[[alg]]$JS
+    MC <- res$jaccard[[alg]]$match
+    
+    
+    cat("> JS <- jaccard_sim(...)\n")
+    cat("> JS\n")
+    print(JS)
+    cat("\n")
+    
+    
+    cat("> MC <- match_clusters(JS, name1=\"", res$ref$name,
+        "\", name2=\"", alg, "\")\n", sep="")
+    cat("> MC\n")
+    print(MC$values)
+    cat("\n")
+    
+    
+    wmean_val <- mean(MC$values)
+    cat("> wmean(MC)\n")
+    cat(wmean_val, "\n\n")
+  }
+}
+```
+### ENRON Network
+
+```{r}
+cat("\n\n## Network:", graphs[['enron']]$name, "\n\n")
+res <- results[['enron']]
+
+cat("### Significance Scores\n\n")
+cat("Reference clustering:", res$ref$name, "\n\n")
+
+if (!is.null(res$sig_tab)) {
+
+  wanted_rows <- c("modularity",
+                   "conductance",
+                   "internal density",
+                   "clustering coef",
+                   "VIdist_to_GT")
+
+  keep_rows <- intersect(wanted_rows, rownames(res$sig_tab))
+
+  print(knitr::kable(res$sig_tab[keep_rows, , drop = FALSE],
+                     caption = paste("Significance scores for",
+                                     graphs[['enron']]$name),
+                     digits = 4))
+  cat("\n\n")
+} else {
+  cat("Significance evaluation not available.\n\n")
+}
+
+# Print global Jaccard scores
+cat("### Global Jaccard Similarity Scores\n\n")
+js_df <- data.frame(
+  Algorithm = names(res$global_js),
+  Global_Jaccard = round(res$global_js, 4)
+)
+print(knitr::kable(js_df, row.names = FALSE))
+cat("\n\n")
+
+
+cat("### Local Jaccard Similarities (Cluster-by-Cluster)\n\n")
+
+for(alg in names(res$jaccard)) {
+  if(is.list(res$jaccard[[alg]])) {
+    
+    cat("#### Algorithm:", alg, "\n\n")
+    
+    JS <- res$jaccard[[alg]]$JS
+    MC <- res$jaccard[[alg]]$match
+    
+    
+    cat("> JS <- jaccard_sim(...)\n")
+    cat("> JS\n")
+    print(JS)
+    cat("\n")
+    
+    
+    cat("> MC <- match_clusters(JS, name1=\"", res$ref$name,
+        "\", name2=\"", alg, "\")\n", sep="")
+    cat("> MC\n")
+    print(MC$values)
+    cat("\n")
+    
+    
+    wmean_val <- mean(MC$values)
+    cat("> wmean(MC)\n")
+    cat(wmean_val, "\n\n")
+  }
+}
+
+```
+
+### Macaque Cortical Network
+
+```{r}
+cat("\n\n## Network:", graphs[['macaque']]$name, "\n\n")
+res <- results[['macaque']]
+
+cat("### Significance Scores\n\n")
+cat("Reference clustering:", res$ref$name, "\n\n")
+
+if (!is.null(res$sig_tab)) {
+
+  wanted_rows <- c("modularity",
+                   "conductance",
+                   "internal density",
+                   "clustering coef",
+                   "VIdist_to_GT")
+
+  keep_rows <- intersect(wanted_rows, rownames(res$sig_tab))
+
+  print(knitr::kable(res$sig_tab[keep_rows, , drop = FALSE],
+                     caption = paste("Significance scores for",
+                                     graphs[['macaque']]$name),
+                     digits = 4))
+  cat("\n\n")
+} else {
+  cat("Significance evaluation not available.\n\n")
+}
+
+# Print global Jaccard scores
+cat("### Global Jaccard Similarity Scores\n\n")
+js_df <- data.frame(
+  Algorithm = names(res$global_js),
+  Global_Jaccard = round(res$global_js, 4)
+)
+print(knitr::kable(js_df, row.names = FALSE))
+cat("\n\n")
+
+
+cat("### Local Jaccard Similarities (Cluster-by-Cluster)\n\n")
+
+for(alg in names(res$jaccard)) {
+  if(is.list(res$jaccard[[alg]])) {
+    
+    cat("#### Algorithm:", alg, "\n\n")
+    
+    JS <- res$jaccard[[alg]]$JS
+    MC <- res$jaccard[[alg]]$match
+    
+    
+    cat("> JS <- jaccard_sim(...)\n")
+    cat("> JS\n")
+    print(JS)
+    cat("\n")
+    
+    
+    cat("> MC <- match_clusters(JS, name1=\"", res$ref$name,
+        "\", name2=\"", alg, "\")\n", sep="")
+    cat("> MC\n")
+    print(MC$values)
+    cat("\n")
+    
+   
+    wmean_val <- mean(MC$values)
+    cat("> wmean(MC)\n")
+    cat(wmean_val, "\n\n")
+  }
+}
+
+
+```
+
+
+
+
+## Summary Comparison Table
+
+```{r}
+# Create comprehensive summary table
+summary_df <- data.frame(
+  Graph = sapply(graphs, function(x) x$name),
+  Nodes = sapply(graphs, function(x) vcount(x$g)),
+  Edges = sapply(graphs, function(x) ecount(x$g)),
+  HasGroundTruth = sapply(graphs, function(x) !is.null(x$gt)),
+  Reference = sapply(results, function(x) x$ref$name),
+  BestAlgorithm = sapply(results, function(x) {
+    # If we have any valid global Jaccard scores, pick the best by Jaccard
+    if (length(x$global_js) > 0 && !all(is.na(x$global_js))) {
+      best <- names(which.max(x$global_js))
+      return(best[1])
+    }
+    # Otherwise, fall back to the algorithm used as reference (if recognizable)
+    ref_name <- x$ref$name
+    # Common patterns: "GroundTruth", "BestByScore_<alg>", "Louvain_fallback"
+    if (startsWith(ref_name, "BestByScore_")) {
+      return(sub("^BestByScore_", "", ref_name))
+    }
+    if (ref_name == "Louvain_fallback") {
+      return("Louvain")
+    }
+    # Last fallback
+    "Louvain"
+  }),
+  BestJaccardScore = sapply(results, function(x) {
+    if (length(x$global_js) == 0 || all(is.na(x$global_js))) {
+      # If no Jaccard values (e.g., all failures), report 0 instead of NA
+      return(0)
+    }
+    round(max(x$global_js, na.rm = TRUE), 4)
+  })
+)
+
+knitr::kable(summary_df, 
+             caption = "Summary of Community Detection Results Across All Networks",
+             row.names = FALSE)
+```
+
+# Visualizations
+
+## Karate Club Network
+
+```{r fig.width=12, fig.height=8}
+par(mfrow = c(2, 2), mar = c(2, 2, 3, 2))
+
+# Ground truth
+plot(g_karate, 
+     vertex.color = results$karate$ref$memb,
+     vertex.size = 15,
+     main = paste("Karate - Reference:", results$karate$ref$name),
+     vertex.label.cex = 0.8)
+
+# Louvain
+plot(g_karate, 
+     vertex.color = results$karate$alg_results$Louvain[[1]],
+     vertex.size = 15,
+     main = paste("Karate - Louvain (J =", 
+                  round(results$karate$global_js["Louvain"], 3), ")"),
+     vertex.label.cex = 0.8)
+
+# Walktrap
+plot(g_karate, 
+     vertex.color = results$karate$alg_results$Walktrap[[1]],
+     vertex.size = 15,
+     main = paste("Karate - Walktrap (J =", 
+                  round(results$karate$global_js["Walktrap"], 3), ")"),
+     vertex.label.cex = 0.8)
+
+# Label Propagation
+plot(g_karate, 
+     vertex.color = results$karate$alg_results$`Label Prop.`[[1]],
+     vertex.size = 15,
+     main = paste("Karate - Label Prop. (J =", 
+                  round(results$karate$global_js["Label Prop."], 3), ")"),
+     vertex.label.cex = 0.8)
+```
+
+## Synthetic Network
+
+```{r fig.width=12, fig.height=8}
+par(mfrow = c(2, 2), mar = c(2, 2, 3, 2))
+
+# Ground truth
+plot(g_synth, 
+     vertex.color = results$synth$ref$memb,
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Synthetic - Reference:", results$synth$ref$name))
+
+# Louvain
+plot(g_synth, 
+     vertex.color = results$synth$alg_results$Louvain[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Synthetic - Louvain (J =", 
+                  round(results$synth$global_js["Louvain"], 3), ")"))
+
+# Walktrap
+plot(g_synth, 
+     vertex.color = results$synth$alg_results$Walktrap[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Synthetic - Walktrap (J =", 
+                  round(results$synth$global_js["Walktrap"], 3), ")"))
+
+# Label Propagation
+plot(g_synth, 
+     vertex.color = results$synth$alg_results$`Label Prop.`[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Synthetic - Label Prop. (J =", 
+                  round(results$synth$global_js["Label Prop."], 3), ")"))
+```
+
+## ENRON Network
+
+```{r fig.width=12, fig.height=8}
+par(mfrow = c(2, 2), mar = c(2, 2, 3, 2))
+
+# Reference (best scoring)
+plot(g_enron, 
+     vertex.color = results$enron$ref$memb,
+     vertex.size = 5,
+     vertex.label = NA,
+     main = paste("ENRON - Reference:", results$enron$ref$name))
+
+# Louvain
+plot(g_enron, 
+     vertex.color = results$enron$alg_results$Louvain[[1]],
+     vertex.size = 5,
+     vertex.label = NA,
+     main = paste("ENRON - Louvain (J =", 
+                  round(results$enron$global_js["Louvain"], 3), ")"))
+
+# Walktrap
+plot(g_enron, 
+     vertex.color = results$enron$alg_results$Walktrap[[1]],
+     vertex.size = 5,
+     vertex.label = NA,
+     main = paste("ENRON - Walktrap (J =", 
+                  round(results$enron$global_js["Walktrap"], 3), ")"))
+
+# Edge Betweenness
+plot(g_enron, 
+     vertex.color = results$enron$alg_results$EdgeBetw[[1]],
+     vertex.size = 5,
+     vertex.label = NA,
+     main = paste("ENRON - EdgeBetw (J =", 
+                  round(results$enron$global_js["EdgeBetw"], 3), ")"))
+
+```
+
+
+## Macaque Cortical Network
+```{r fig.width=12, fig.height=8}
+par(mfrow = c(2, 2), mar = c(2, 2, 3, 2))
+
+# Reference (best scoring)
+plot(g_macaque, 
+     vertex.color = results$macaque$ref$memb,
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Macaque - Reference:", results$macaque$ref$name))
+
+# Louvain
+plot(g_macaque, 
+     vertex.color = results$macaque$alg_results$Louvain[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Macaque - Louvain (J =", 
+                  round(results$macaque$global_js["Louvain"], 3), ")"))
+
+# Walktrap
+plot(g_macaque, 
+     vertex.color = results$macaque$alg_results$Walktrap[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Macaque - Walktrap (J =", 
+                  round(results$macaque$global_js["Walktrap"], 3), ")"))
+
+# Label Propagation
+plot(g_macaque, 
+     vertex.color = results$macaque$alg_results$`Label Prop.`[[1]],
+     vertex.size = 8,
+     vertex.label = NA,
+     main = paste("Macaque - Label Prop. (J =", 
+                  round(results$macaque$global_js["Label Prop."], 3), ")"))
+```
+
