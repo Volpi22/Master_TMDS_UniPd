@@ -1,0 +1,449 @@
+@prefix ex: <http://example.org/biomed#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Disease a rdfs:Class .
+
+ex:Drug a rdfs:Class .
+
+ex:Amoxicillin a ex:Antibiotic ;
+    ex:treats ex:BacterialInfection .
+
+ex:Disease_13 a ex:ViralInfection ;
+    rdfs:label "Condition 13" .
+
+ex:Disease_22 a ex:InfectiousDisease ;
+    rdfs:label "Condition 22" .
+
+ex:Disease_37 a ex:ViralInfection ;
+    rdfs:label "Condition 37" .
+
+ex:Disease_40 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 40" .
+
+ex:Disease_46 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 46" .
+
+ex:Disease_9 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 9" .
+
+ex:Drug_1 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 1" ;
+    ex:relieves ex:Disease_36 ;
+    ex:treats ex:Disease_15 ;
+    ex:worsens ex:Disease_45 .
+
+ex:Drug_10 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 10" ;
+    ex:relieves ex:Disease_44 .
+
+ex:Drug_11 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 11" ;
+    ex:relieves ex:Disease_39,
+        ex:Disease_5 ;
+    ex:worsens ex:Disease_25 .
+
+ex:Drug_12 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 12" ;
+    ex:treats ex:Disease_1 ;
+    ex:worsens ex:Disease_44,
+        ex:Disease_47 .
+
+ex:Drug_13 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 13" ;
+    ex:relieves ex:Disease_50 ;
+    ex:treats ex:Disease_42 .
+
+ex:Drug_14 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 14" ;
+    ex:relieves ex:Disease_28 ;
+    ex:treats ex:Disease_11 .
+
+ex:Drug_15 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 15" ;
+    ex:treats ex:Disease_33,
+        ex:Disease_47 ;
+    ex:worsens ex:Disease_17 .
+
+ex:Drug_16 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 16" ;
+    ex:treats ex:Disease_33,
+        ex:Disease_41 ;
+    ex:worsens ex:Disease_20 .
+
+ex:Drug_17 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 17" ;
+    ex:worsens ex:Disease_11,
+        ex:Disease_49 .
+
+ex:Drug_18 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 18" ;
+    ex:relieves ex:Disease_39 .
+
+ex:Drug_19 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 19" ;
+    ex:relieves ex:Disease_2,
+        ex:Disease_8 .
+
+ex:Drug_2 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 2" ;
+    ex:relieves ex:Disease_3 .
+
+ex:Drug_20 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 20" ;
+    ex:treats ex:Disease_4 .
+
+ex:Drug_21 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 21" ;
+    ex:treats ex:Disease_32,
+        ex:Disease_6 ;
+    ex:worsens ex:Disease_47 .
+
+ex:Drug_22 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 22" ;
+    ex:relieves ex:Disease_43 .
+
+ex:Drug_23 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 23" ;
+    ex:relieves ex:Disease_17 ;
+    ex:treats ex:Disease_34 ;
+    ex:worsens ex:Disease_11 .
+
+ex:Drug_24 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 24" ;
+    ex:relieves ex:Disease_45 ;
+    ex:treats ex:Disease_49 ;
+    ex:worsens ex:Disease_47 .
+
+ex:Drug_25 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 25" ;
+    ex:relieves ex:Disease_42,
+        ex:Disease_43 .
+
+ex:Drug_26 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 26" ;
+    ex:relieves ex:Disease_16 ;
+    ex:treats ex:Disease_29,
+        ex:Disease_8 .
+
+ex:Drug_27 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 27" ;
+    ex:worsens ex:Disease_38 .
+
+ex:Drug_28 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 28" ;
+    ex:treats ex:Disease_38 .
+
+ex:Drug_29 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 29" ;
+    ex:worsens ex:Disease_5 .
+
+ex:Drug_3 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 3" ;
+    ex:treats ex:Disease_18 ;
+    ex:worsens ex:Disease_5 .
+
+ex:Drug_30 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 30" ;
+    ex:relieves ex:Disease_15 ;
+    ex:treats ex:Disease_4,
+        ex:Disease_5 .
+
+ex:Drug_31 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 31" ;
+    ex:relieves ex:Disease_16 ;
+    ex:treats ex:Disease_18 ;
+    ex:worsens ex:Disease_43 .
+
+ex:Drug_32 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 32" ;
+    ex:worsens ex:Disease_47 .
+
+ex:Drug_33 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 33" ;
+    ex:treats ex:Disease_16,
+        ex:Disease_27,
+        ex:Disease_31 .
+
+ex:Drug_34 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 34" ;
+    ex:relieves ex:Disease_28 ;
+    ex:treats ex:Disease_27 ;
+    ex:worsens ex:Disease_23 .
+
+ex:Drug_35 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 35" ;
+    ex:relieves ex:Disease_4,
+        ex:Disease_42 ;
+    ex:worsens ex:Disease_7 .
+
+ex:Drug_36 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 36" ;
+    ex:treats ex:Disease_16 .
+
+ex:Drug_37 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 37" ;
+    ex:relieves ex:Disease_35 .
+
+ex:Drug_38 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 38" ;
+    ex:treats ex:Disease_28 .
+
+ex:Drug_39 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 39" ;
+    ex:relieves ex:Disease_16 ;
+    ex:treats ex:Disease_30 .
+
+ex:Drug_4 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 4" ;
+    ex:relieves ex:Disease_14,
+        ex:Disease_21 ;
+    ex:worsens ex:Disease_42 .
+
+ex:Drug_40 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 40" ;
+    ex:treats ex:Disease_4,
+        ex:Disease_42 ;
+    ex:worsens ex:Disease_7 .
+
+ex:Drug_41 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 41" ;
+    ex:relieves ex:Disease_11 .
+
+ex:Drug_42 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 42" ;
+    ex:relieves ex:Disease_31 ;
+    ex:treats ex:Disease_14 .
+
+ex:Drug_43 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 43" ;
+    ex:treats ex:Disease_25 .
+
+ex:Drug_44 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 44" ;
+    ex:relieves ex:Disease_17,
+        ex:Disease_30 .
+
+ex:Drug_45 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 45" ;
+    ex:relieves ex:Disease_36 ;
+    ex:treats ex:Disease_43 ;
+    ex:worsens ex:Disease_47 .
+
+ex:Drug_46 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 46" ;
+    ex:treats ex:Disease_19 .
+
+ex:Drug_47 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 47" ;
+    ex:worsens ex:Disease_38 .
+
+ex:Drug_48 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 48" ;
+    ex:treats ex:Disease_4,
+        ex:Disease_48 ;
+    ex:worsens ex:Disease_21 .
+
+ex:Drug_49 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 49" ;
+    ex:treats ex:Disease_33,
+        ex:Disease_34 .
+
+ex:Drug_5 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 5" ;
+    ex:treats ex:Disease_10,
+        ex:Disease_17 .
+
+ex:Drug_50 a ex:AntiInflammatory ;
+    rdfs:label "Experimental Drug 50" ;
+    ex:treats ex:Disease_12 ;
+    ex:worsens ex:Disease_5,
+        ex:Disease_6 .
+
+ex:Drug_6 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 6" ;
+    ex:relieves ex:Disease_17 ;
+    ex:worsens ex:Disease_35,
+        ex:Disease_36 .
+
+ex:Drug_7 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 7" ;
+    ex:relieves ex:Disease_15 ;
+    ex:treats ex:Disease_26 ;
+    ex:worsens ex:Disease_24 .
+
+ex:Drug_8 a ex:Antibiotic ;
+    rdfs:label "Experimental Drug 8" ;
+    ex:treats ex:Disease_49 .
+
+ex:Drug_9 a ex:Antiviral ;
+    rdfs:label "Experimental Drug 9" ;
+    ex:worsens ex:Disease_10 .
+
+ex:Ibuprofen a ex:AntiInflammatory ;
+    ex:relieves ex:Arthritis ;
+    ex:worsens ex:GastricUlcer .
+
+ex:relieves a rdf:Property ;
+    rdfs:subPropertyOf ex:affects .
+
+ex:treats a rdf:Property ;
+    rdfs:subPropertyOf ex:affects .
+
+ex:worsens a rdf:Property ;
+    rdfs:subPropertyOf ex:affects .
+
+ex:Arthritis a ex:InflammatoryDisease .
+
+ex:BacterialInfection a ex:InfectiousDisease .
+
+ex:Disease_1 a ex:ViralInfection ;
+    rdfs:label "Condition 1" .
+
+ex:Disease_12 a ex:ViralInfection ;
+    rdfs:label "Condition 12" .
+
+ex:Disease_19 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 19" .
+
+ex:Disease_2 a ex:InfectiousDisease ;
+    rdfs:label "Condition 2" .
+
+ex:Disease_20 a ex:ViralInfection ;
+    rdfs:label "Condition 20" .
+
+ex:Disease_23 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 23" .
+
+ex:Disease_24 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 24" .
+
+ex:Disease_26 a ex:InfectiousDisease ;
+    rdfs:label "Condition 26" .
+
+ex:Disease_29 a ex:ViralInfection ;
+    rdfs:label "Condition 29" .
+
+ex:Disease_3 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 3" .
+
+ex:Disease_32 a ex:InfectiousDisease ;
+    rdfs:label "Condition 32" .
+
+ex:Disease_41 a ex:ViralInfection ;
+    rdfs:label "Condition 41" .
+
+ex:Disease_48 a ex:InfectiousDisease ;
+    rdfs:label "Condition 48" .
+
+ex:Disease_50 a ex:InfectiousDisease ;
+    rdfs:label "Condition 50" .
+
+ex:GastricUlcer a ex:Disease .
+
+ex:Disease_10 a ex:ViralInfection ;
+    rdfs:label "Condition 10" .
+
+ex:Disease_14 a ex:InfectiousDisease ;
+    rdfs:label "Condition 14" .
+
+ex:Disease_18 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 18" .
+
+ex:Disease_21 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 21" .
+
+ex:Disease_25 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 25" .
+
+ex:Disease_27 a ex:InfectiousDisease ;
+    rdfs:label "Condition 27" .
+
+ex:Disease_30 a ex:InfectiousDisease ;
+    rdfs:label "Condition 30" .
+
+ex:Disease_31 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 31" .
+
+ex:Disease_34 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 34" .
+
+ex:Disease_35 a ex:ViralInfection ;
+    rdfs:label "Condition 35" .
+
+ex:Disease_39 a ex:ViralInfection ;
+    rdfs:label "Condition 39" .
+
+ex:Disease_44 a ex:ViralInfection ;
+    rdfs:label "Condition 44" .
+
+ex:Disease_45 a ex:ViralInfection ;
+    rdfs:label "Condition 45" .
+
+ex:Disease_6 a ex:ViralInfection ;
+    rdfs:label "Condition 6" .
+
+ex:Disease_7 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 7" .
+
+ex:Disease_8 a ex:InfectiousDisease ;
+    rdfs:label "Condition 8" .
+
+ex:Disease_15 a ex:ViralInfection ;
+    rdfs:label "Condition 15" .
+
+ex:Disease_28 a ex:InfectiousDisease ;
+    rdfs:label "Condition 28" .
+
+ex:Disease_33 a ex:InfectiousDisease ;
+    rdfs:label "Condition 33" .
+
+ex:Disease_36 a ex:InfectiousDisease ;
+    rdfs:label "Condition 36" .
+
+ex:Disease_38 a ex:ViralInfection ;
+    rdfs:label "Condition 38" .
+
+ex:Disease_49 a ex:InfectiousDisease ;
+    rdfs:label "Condition 49" .
+
+ex:affects a rdf:Property ;
+    rdfs:domain ex:Drug ;
+    rdfs:range ex:Disease .
+
+ex:Disease_11 a ex:InfectiousDisease ;
+    rdfs:label "Condition 11" .
+
+ex:Disease_43 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 43" .
+
+ex:Disease_16 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 16" .
+
+ex:Disease_17 a ex:ViralInfection ;
+    rdfs:label "Condition 17" .
+
+ex:Disease_4 a ex:ViralInfection ;
+    rdfs:label "Condition 4" .
+
+ex:Disease_42 a ex:ViralInfection ;
+    rdfs:label "Condition 42" .
+
+ex:Disease_5 a ex:InfectiousDisease ;
+    rdfs:label "Condition 5" .
+
+ex:Disease_47 a ex:InflammatoryDisease ;
+    rdfs:label "Condition 47" .
+
+ex:AntiInflammatory rdfs:subClassOf ex:Drug .
+
+ex:Antiviral rdfs:subClassOf ex:Drug .
+
+ex:InfectiousDisease rdfs:subClassOf ex:Disease .
+
+ex:InflammatoryDisease rdfs:subClassOf ex:Disease .
+
+ex:ViralInfection rdfs:subClassOf ex:Disease .
+
+ex:Antibiotic rdfs:subClassOf ex:Drug .
+
