@@ -36,7 +36,6 @@ def generate_knowledge_graph():
     # Subproperties (Inherit Domain and Range automatically)
     subproperties = [EX.treats, EX.relieves, EX.worsens]
     for prop in subproperties:
-        g.add((prop, RDF.type, RDF.Property))
         g.add((prop, RDFS.subPropertyOf, EX.affects))
 
 
@@ -99,7 +98,7 @@ def generate_knowledge_graph():
     # 4. EXPORT TO TURTLE FILE (.ttl)
     # ==========================================
     
-    output_filename = "LAB2-Volpi_Clerici.ttl" 
+    output_filename = "G12E-ClericiVolpi.ttl" 
     
     print(f"Serializing graph to {output_filename}...")
     g.serialize(destination=output_filename, format="turtle")

@@ -284,14 +284,11 @@ ex:Ibuprofen a ex:AntiInflammatory ;
     ex:relieves ex:Arthritis ;
     ex:worsens ex:GastricUlcer .
 
-ex:relieves a rdf:Property ;
-    rdfs:subPropertyOf ex:affects .
+ex:relieves rdfs:subPropertyOf ex:affects .
 
-ex:treats a rdf:Property ;
-    rdfs:subPropertyOf ex:affects .
+ex:treats rdfs:subPropertyOf ex:affects .
 
-ex:worsens a rdf:Property ;
-    rdfs:subPropertyOf ex:affects .
+ex:worsens rdfs:subPropertyOf ex:affects .
 
 ex:Arthritis a ex:InflammatoryDisease .
 
